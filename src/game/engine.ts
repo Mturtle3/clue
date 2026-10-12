@@ -12,6 +12,7 @@ import type {
   RuleSettings,
   Suggestion,
   SuggestionHistoryEntry,
+  AccusationResult,
 } from "./types.ts";
 import { CHARACTERS, DEFAULT_RULES, findCharacterByName, getCharacter } from "./types.ts";
 
@@ -121,6 +122,7 @@ export function createGame(
     suggestion: null,
     suggestionHistory: [],
     lastSuggestionRoomByPlayer: {},
+    lastAccusation: null,
     solution: dealt.solution,
     hands: dealt.hands,
     notes: {},
@@ -163,6 +165,7 @@ export function startGame(state: GameState): GameState {
     suggestion: null,
     suggestionHistory: dealtState.suggestionHistory ?? [],
     lastSuggestionRoomByPlayer: dealtState.lastSuggestionRoomByPlayer ?? {},
+    lastAccusation: null,
     events: [event("The doors are locked. The investigation begins.", "gold"), ...state.events].slice(0, 30),
   };
 }
@@ -398,26 +401,43 @@ export function makeAccusation(state: GameState, playerId: string, suspectId: st
   const player = currentPlayer(state);
   if (state.phase !== "playing" || !player || player.id !== playerId || (!state.settings.finalAccusationAnytime && (!playerIsInRoom(player) || player.position.roomId !== roomId))) return state;
   const correct = [suspectId, weaponId, roomId].every((id) => state.solution.includes(id));
+  const accusation: AccusationResult = { byPlayerId: playerId, suspectId, weaponId, roomId, correct };
   if (correct) {
     return {
       ...state,
       phase: "won",
       winnerId: playerId,
+      lastAccusation: accusation,
       events: [event(`${player.name} solved the mystery. Case closed.`, "gold"), ...state.events].slice(0, 30),
     };
   }
   const updatedPlayer = { ...player, eliminated: true };
-  const remaining = activePlayers(state).filter((candidate) => candidate.id !== playerId);
-  if (remaining.length <= 1) {
+  if (state.players.length === 2) {
     return {
       ...state,
       phase: "ended",
+      lastAccusation: accusation,
       players: state.players.map((candidate) => (candidate.id === playerId ? updatedPlayer : candidate)),
+      movesLeft: 0,
+      suggestion: null,
+      events: [event(`${player.name}'s accusation was incorrect. The case is over.`, "rose"), ...state.events].slice(0, 30),
+    };
+  }
+  const remaining = activePlayers(state).filter((candidate) => candidate.id !== playerId);
+  if (remaining.length === 0) {
+    return {
+      ...state,
+      phase: "ended",
+      lastAccusation: accusation,
+      players: state.players.map((candidate) => (candidate.id === playerId ? updatedPlayer : candidate)),
+      movesLeft: 0,
+      suggestion: null,
       events: [event(`${player.name}'s accusation was incorrect. The case is over.`, "rose"), ...state.events].slice(0, 30),
     };
   }
   const nextState: GameState = {
     ...state,
+    lastAccusation: accusation,
     players: state.players.map((candidate) => (candidate.id === playerId ? updatedPlayer : candidate)),
     movesLeft: 0,
     suggestion: null,

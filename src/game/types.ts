@@ -116,6 +116,14 @@ export type SuggestionHistoryEntry = {
   timestamp: number;
 };
 
+export type AccusationResult = {
+  byPlayerId: string;
+  suspectId: string;
+  weaponId: string;
+  roomId: RoomId;
+  correct: boolean;
+};
+
 export type EventTone = "gold" | "rose" | "mint" | "blue" | "slate";
 
 export type GameEvent = {
@@ -147,6 +155,7 @@ export type GameState = {
   suggestion: Suggestion | null;
   suggestionHistory: SuggestionHistoryEntry[];
   lastSuggestionRoomByPlayer: Record<string, RoomId>;
+  lastAccusation: AccusationResult | null;
   solution: string[];
   hands: Record<string, string[]>;
   notes: Record<string, Record<string, "unknown" | "maybe" | "ruled-out" | "found">>;

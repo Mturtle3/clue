@@ -76,15 +76,15 @@
   .clean-game-layout { width: calc(100% - 24px); padding-top: 18px; }.clean-title-row { align-items: start; }.clean-title-row h1 { font-size: 36px; }.clean-turn-summary { font-size: 10px; }.tile-board { min-height: 355px; height: 100vw; }.tile-board-top, .tile-board-bottom { font-size: 7px; padding: 8px 10px; }.board-tile { width: 18px; }.board-tile.room-tile { width: 61px; padding: 5px 3px 3px; }.board-tile.room-tile .tile-mark { font-size: 12px; }.board-tile.room-tile strong { font-size: 7px; }.board-pawn { width: 13px; height: 13px; font-size: 7px; }.board-center-card { width: 37%; padding: 12px 7px; }.board-center-card strong { font-size: 16px; }.board-center-card small { font-size: 8px; }.clean-action-bar { gap: 6px; }.clean-action-bar .button { flex: 1; min-width: 0; padding: 9px 7px; font-size: 9px; }.clean-action-divider { display: none; }.clean-sidebar { grid-template-columns: 1fr; }.clean-header { padding: 0 14px; }.clean-header .header-room span, .clean-header .demo-switcher { display: none; }.clean-header .connection-badge { font-size: 0; }.clean-header .connection-badge .status-dot { margin: 0; }.suggestion-bar { bottom: 10px; width: calc(100% - 20px); flex-wrap: wrap; }.response-buttons { width: 100%; margin-left: 19px; }.selection-modal { padding: 24px 18px; }
 }
 
-/* The playable board uses the supplied classic-board artwork as its floorplan.
-   The transparent buttons above it are the walkable 25 x 25 spaces. */
+/* The playable board is rendered from the same 25 x 25 tile graph as movement.
+   The final board skin below keeps the room geometry and controls aligned. */
 .tile-board {
   width: min(100%, 820px);
   height: auto;
   min-height: 0;
   aspect-ratio: 1 / 1;
   margin: 0 auto;
-  background: #16201e url('../assets/clue-board-reference.jpg') center / 100% 100% no-repeat;
+  background: #16201e;
   box-shadow: inset 0 0 0 8px rgba(48, 27, 20, .34), 0 4px 0 rgba(50, 29, 25, .18);
 }
 .tile-board-grid { display: none; }
@@ -127,11 +127,25 @@
 .notebook-owner { display: grid; align-content: center; gap: 3px; padding: 5px 7px; border-left: 1px solid rgba(85, 50, 38, .2); background: rgba(255, 247, 222, .44); }
 .notebook-owner > span { color: var(--board-muted); font: 8px 'DM Mono', monospace; letter-spacing: .06em; text-transform: uppercase; }
 .notebook-owner select { width: 100%; min-width: 0; padding: 5px 4px; color: var(--board-ink); background: #fff8e7; border: 1px solid rgba(85, 50, 38, .32); border-radius: 2px; font-size: 10px; }
+.notebook-owner.locked { background: rgba(240, 215, 155, .82); }
+.notebook-owner select:disabled { color: var(--board-ink); background: #f0d79b; opacity: 1; cursor: not-allowed; }
+.owner-lock { color: var(--board-red); font: 8px Georgia, serif; }
 .notebook-card.owned .notebook-owner { background: rgba(240, 215, 155, .7); }
 .legend-owner { color: var(--board-ink); background: #e4b55d; }
 
+.accusation-result { display: grid; gap: 7px; margin: 0 0 13px; padding: 12px 14px; color: var(--board-ink); background: var(--board-paper); border: 3px solid var(--board-wood); border-radius: 3px; box-shadow: 3px 4px 0 rgba(51, 29, 24, .16); }
+.accusation-result.correct { background: #e8efd5; border-color: #657d55; }
+.accusation-result.incorrect { background: #f1d1c7; border-color: var(--board-red); }
+.accusation-result-heading { display: grid; gap: 3px; }
+.accusation-result-heading strong { color: var(--board-ink); font: 17px Georgia, serif; }
+.accusation-result-picks { color: var(--board-muted); font: 12px Georgia, serif; }
+.accusation-result > b { color: var(--board-red); font: 700 11px 'DM Mono', monospace; letter-spacing: .07em; }
+.accusation-result.correct > b { color: #386047; }
+
 .clean-game .clean-history-card, .clean-game .clean-activity { display: none; }
 .clean-game .clean-sidebar { align-content: start; }
+.clean-player-row.eliminated { opacity: .58; }
+.clean-eliminated-label { color: var(--board-red); font: 700 8px Georgia, serif; letter-spacing: .05em; }
 .clean-player-row.player-coral { color: #9a2f2b; }
 .clean-player-row.player-gold { color: #9a6b16; }
 .clean-player-row.player-mint { color: #2f684d; }
@@ -538,36 +552,52 @@ body { background: var(--board-paper-dark); color: var(--board-ink); }
   .notebook-summary-action:after { content: 'fold'; font-size: 9px; }
 }
 
-/* Final physical-board overrides. These stay at the end so the older visual
-   skin above cannot override the real board floorplan or notebook controls. */
+/* Procedural board skin. Rooms, paths, and clickable movement spaces all use
+   the same 25 x 25 geometry; there is no imported board image underneath. */
 .tile-board {
   width: min(100%, 820px);
   height: auto;
   min-height: 0;
   aspect-ratio: 1 / 1;
   margin: 0 auto;
-  background: #16201e url('../assets/clue-board-reference.jpg') center / 100% 100% no-repeat;
-  box-shadow: inset 0 0 0 8px rgba(48, 27, 20, .34), 0 4px 0 rgba(50, 29, 25, .18);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(126, 164, 143, .2), transparent 43%),
+    linear-gradient(135deg, #1b3a35, #122925 58%, #0d1b1d);
+  box-shadow: inset 0 0 0 8px rgba(48, 27, 20, .46), inset 0 0 42px rgba(8, 18, 18, .46), 0 4px 0 rgba(50, 29, 25, .18);
 }
-.tile-board-grid { display: none; }
+.tile-board-grid { display: block; inset: 2%; z-index: 0; opacity: 1; border: 3px double rgba(242, 222, 177, .3); background-image: linear-gradient(rgba(201, 224, 203, .12) 1px, transparent 1px), linear-gradient(90deg, rgba(201, 224, 203, .12) 1px, transparent 1px); background-size: 4% 4%; }
+.tile-board:before, .tile-board:after { display: none; }
 .tile-connection:not(.secret) { display: none; }
-.tile-connection.secret { z-index: 4; height: 5px; background: repeating-linear-gradient(90deg, #b64232 0 8px, transparent 8px 14px); border: 0; box-shadow: 0 0 0 2px rgba(255, 238, 193, .6); }
-.board-center-card { display: none; }
-.board-tile { background: transparent; border: 0; box-shadow: none; opacity: 1; }
+.tile-connection.secret { z-index: 1; height: 3px; background: repeating-linear-gradient(90deg, #edb07c 0 8px, transparent 8px 14px); border: 0; box-shadow: 0 0 0 1px rgba(255, 238, 193, .24); }
+.board-room { position: absolute; z-index: 2; display: grid; place-content: center; justify-items: center; gap: 4px; padding: 8px; overflow: hidden; color: #f8e9c4; text-align: center; pointer-events: none; border: 3px solid rgba(247, 225, 176, .72); border-radius: 6px; box-shadow: inset 0 0 0 3px rgba(15, 31, 29, .38), 0 5px 0 rgba(8, 20, 19, .36), 0 0 22px rgba(0, 0, 0, .16); }
+.board-room.tile-coral { background: linear-gradient(145deg, #7d443b, #5a302f); }
+.board-room.tile-gold { background: linear-gradient(145deg, #776139, #4e432c); }
+.board-room.tile-mint { background: linear-gradient(145deg, #37675a, #285047); }
+.board-room.tile-lime { background: linear-gradient(145deg, #596b3b, #3b4d31); }
+.board-room.tile-sky { background: linear-gradient(145deg, #3b6070, #2a4658); }
+.board-room.tile-violet { background: linear-gradient(145deg, #5a4b70, #403653); }
+.board-room.tile-rose { background: linear-gradient(145deg, #744453, #523340); }
+.board-room-glyph { color: #f2c878; font: 17px Georgia, serif; line-height: 1; }
+.board-room span { max-width: 100%; font: 700 clamp(9px, 1.35vw, 17px) Georgia, serif; letter-spacing: .02em; text-transform: uppercase; white-space: nowrap; }
+.board-room small { max-width: 100%; overflow: hidden; color: rgba(255, 239, 204, .78); font: clamp(7px, .8vw, 10px) 'DM Mono', monospace; letter-spacing: .04em; text-overflow: ellipsis; white-space: nowrap; }
+.board-center-card { position: absolute; z-index: 3; left: 32%; top: 32%; width: 36%; height: 36%; transform: none; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 18px; color: #f8e9c4; text-align: center; background: radial-gradient(circle at 50% 35%, #36564b, #213c36 68%, #1a302f); border: 3px solid rgba(242, 210, 143, .7); border-radius: 11px; box-shadow: inset 0 0 0 3px rgba(10, 25, 23, .34), 0 5px 0 rgba(8, 20, 19, .36), 0 0 25px rgba(0, 0, 0, .2); pointer-events: none; }
+.board-center-card span { color: #f2c878; font: 10px 'DM Mono', monospace; letter-spacing: .14em; }
+.board-center-card strong { font: clamp(18px, 2.6vw, 30px) Georgia, serif; }
+.board-center-card small { max-width: 190px; color: rgba(255, 239, 204, .76); font-size: clamp(8px, .95vw, 11px); line-height: 1.35; }
+.board-tile { background: rgba(219, 232, 208, .15); border: 1px solid rgba(225, 236, 214, .3); box-shadow: inset 0 0 0 1px rgba(8, 27, 24, .28); opacity: 1; }
 .tile-board .board-tile:disabled { opacity: 1; }
-.board-tile.path-tile { width: 4%; height: 4%; aspect-ratio: 1; border: 0; border-radius: 2px; background: transparent; }
+.board-tile.path-tile { width: 4%; height: 4%; aspect-ratio: 1; border-radius: 2px; background: linear-gradient(145deg, rgba(218, 231, 208, .24), rgba(150, 179, 158, .1)); }
 .board-tile.path-tile .tile-mark, .board-tile.room-tile .tile-mark, .board-tile.room-tile strong { display: none; }
-.board-tile.room-tile { width: 21%; height: 21%; aspect-ratio: auto; padding: 0; background: transparent; border: 0; box-shadow: none; }
-.board-tile.room-tile.tile-coral, .board-tile.room-tile.tile-gold, .board-tile.room-tile.tile-mint, .board-tile.room-tile.tile-lime, .board-tile.room-tile.tile-sky, .board-tile.room-tile.tile-violet, .board-tile.room-tile.tile-rose { background: transparent; }
-.board-tile.reachable { background: rgba(255, 241, 180, .62); border: 2px solid #a33f32; box-shadow: 0 0 0 3px rgba(255, 245, 203, .7), 0 2px 5px rgba(49, 28, 22, .35); }
-.board-tile.room-tile.reachable { background: rgba(255, 242, 192, .34); }
+.board-tile.room-tile { width: 4%; height: 4%; aspect-ratio: 1; padding: 0; z-index: 5; background: rgba(242, 206, 126, .2); border: 2px solid rgba(242, 206, 126, .85); box-shadow: 0 0 0 2px rgba(8, 24, 22, .5), 0 2px 0 rgba(8, 20, 19, .34); }
+.board-tile.reachable { background: rgba(226, 242, 173, .62); border: 2px solid #f0d17f; box-shadow: 0 0 0 3px rgba(249, 231, 166, .3), 0 0 15px rgba(240, 209, 127, .34); cursor: pointer; }
+.board-tile.room-tile.reachable { background: rgba(246, 224, 152, .82); }
 .board-tile.reachable:after { display: none; }
-.board-tile.current { background: rgba(255, 218, 104, .25); border: 2px solid #fff0bd; box-shadow: 0 0 0 3px #a33f32, 0 2px 6px rgba(49, 28, 22, .35); }
-.board-tile.path-tile.current { background: rgba(255, 218, 104, .75); }
-.tile-occupants { display: flex; justify-content: center; align-items: center; gap: 2px; min-height: 28px; }
-.board-pawn { position: relative; z-index: 6; width: 24px; height: 24px; margin-left: -5px; border: 3px solid #fff4d4; color: #fff8e6; font-size: 10px; box-shadow: 1px 2px 0 rgba(51, 29, 24, .58), 0 0 0 1px rgba(51, 29, 24, .65); }
+.board-tile.current { background: rgba(251, 213, 111, .38); border: 2px solid #fff0bd; box-shadow: 0 0 0 3px #b6523b, 0 0 17px rgba(250, 206, 107, .36); }
+.board-tile.path-tile.current { background: rgba(252, 212, 108, .8); }
+.tile-occupants { display: flex; justify-content: center; align-items: center; gap: 2px; min-height: 27px; }
+.board-pawn { position: relative; z-index: 6; width: 24px; height: 24px; margin-left: -5px; border: 3px solid #fff4d4; color: #fff8e6; font-size: 10px; box-shadow: 1px 2px 0 rgba(8, 20, 19, .58), 0 0 0 1px rgba(8, 20, 19, .65); }
 .board-pawn:first-child { margin-left: 0; }
-.secret-board-note { z-index: 7; color: #fff1d0; background: rgba(49, 28, 22, .82); border-color: #df9a5d; }
+.secret-board-note { z-index: 7; right: 12px; bottom: 12px; padding: 4px 7px; color: #ffe9b7; background: rgba(35, 28, 24, .78); border: 1px dashed #df9a5d; border-radius: 3px; font: 9px Georgia, serif; letter-spacing: .03em; text-transform: none; }
 
 .suspect-choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 5px 0 14px; }
 .suspect-choice { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 9px; min-height: 58px; padding: 8px 10px; color: var(--board-ink); background: #fff4d8; border: 2px solid rgba(85, 50, 38, .25); border-radius: 3px; cursor: pointer; }

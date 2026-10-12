@@ -48,9 +48,8 @@ export const ROOM_IDS: RoomId[] = [
 
 type GridPoint = [number, number];
 
-// The interactive spaces follow the 25 x 25 footprint of a classic Clue
-// board. The supplied board artwork supplies the room walls and labels; this
-// grid supplies the real spaces players can walk through.
+// The interactive spaces follow a 25 x 25 estate footprint. The same geometry
+// is rendered by the browser as room blocks, corridors, and clickable tiles.
 const ROOM_POINTS: Record<RoomId, GridPoint> = {
   kitchen: [3, 3],
   ballroom: [12, 3],
