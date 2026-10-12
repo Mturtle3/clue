@@ -106,6 +106,7 @@ export function createGame(
   const deckInfo = {
     handSize: pool.handSize,
     expansionCards: pool.expansionCards.map((card) => card.id),
+    activeCards: pool.cards.map((card) => card.id),
     totalCards: pool.cards.length,
   };
   return {
@@ -446,7 +447,7 @@ export function refreshHands(state: GameState): GameState {
     ...state,
     solution: dealt.solution,
     hands: dealt.hands,
-    deckInfo: { handSize: pool.handSize, expansionCards: pool.expansionCards.map((card) => card.id), totalCards: pool.cards.length },
+    deckInfo: { handSize: pool.handSize, expansionCards: pool.expansionCards.map((card) => card.id), activeCards: pool.cards.map((card) => card.id), totalCards: pool.cards.length },
     players: state.players.map((player) => ({ ...player, cardCount: dealt.hands[player.id]?.length ?? 0 })),
   };
 }

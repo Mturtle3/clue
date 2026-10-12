@@ -155,6 +155,7 @@ export type GameState = {
   deckInfo: {
     handSize: number;
     expansionCards: string[];
+    activeCards: string[];
     totalCards: number;
   };
 };
