@@ -16,7 +16,7 @@ import {
   updateSettings,
 } from "../../../src/game/engine.ts";
 import type { GameState, RuleSettings, RoomId } from "../../../src/game/types.ts";
-import { DEFAULT_RULES } from "../../../src/game/types.ts";
+import { CHARACTERS, DEFAULT_RULES, findCharacterByName } from "../../../src/game/types.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,8 +25,8 @@ const corsHeaders = {
 };
 
 type Action =
-  | { type: "create"; roomName: string; displayName: string; settings?: Partial<RuleSettings> }
-  | { type: "join"; roomCode: string; displayName: string }
+  | { type: "create"; roomName: string; characterId: string; settings?: Partial<RuleSettings> }
+  | { type: "join"; roomCode: string; characterId: string }
   | { type: "get"; roomCode: string }
   | { type: "ready"; roomCode: string }
   | { type: "settings"; roomCode: string; settings: Partial<RuleSettings> }
@@ -51,14 +51,29 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function viewerSuggestion(suggestion: GameState["suggestion"], viewerId: string) {
+  if (!suggestion) return null;
+  const { shownCardId: _shownCardId, ...safeSuggestion } = suggestion;
+  return suggestion.shownToPlayerId === viewerId && suggestion.shownCardId
+    ? { ...safeSuggestion, shownCardId: suggestion.shownCardId }
+    : safeSuggestion;
+}
+
+function viewerHistory(history: GameState["suggestionHistory"] = [], viewerId = "") {
+  return history.map((entry) => {
+    const { shownCardId: _shownCardId, ...safeEntry } = entry;
+    return entry.shownToPlayerId === viewerId && entry.shownCardId
+      ? { ...safeEntry, shownCardId: entry.shownCardId }
+      : safeEntry;
+  });
+}
+
 function publicState(state: GameState, viewerId: string) {
   const { solution: _solution, hands: _hands, notes: _notes, ...safeState } = state;
-  const safeSuggestion = safeState.suggestion
-    ? (({ shownCardId: _shownCardId, ...suggestion }) => suggestion)(safeState.suggestion)
-    : null;
   return {
     ...safeState,
-    suggestion: safeSuggestion,
+    suggestion: viewerSuggestion(state.suggestion, viewerId),
+    suggestionHistory: viewerHistory(state.suggestionHistory ?? [], viewerId),
     myPlayerId: viewerId,
     myHand: state.hands[viewerId] ?? [],
     myNotes: state.notes[viewerId] ?? {},
@@ -67,10 +82,7 @@ function publicState(state: GameState, viewerId: string) {
 
 function publicStoredState(state: GameState) {
   const { solution: _solution, hands: _hands, notes: _notes, ...safeState } = state;
-  const safeSuggestion = safeState.suggestion
-    ? (({ shownCardId: _shownCardId, ...suggestion }) => suggestion)(safeState.suggestion)
-    : null;
-  return { ...safeState, suggestion: safeSuggestion };
+  return { ...safeState, suggestion: viewerSuggestion(state.suggestion, ""), suggestionHistory: viewerHistory(state.suggestionHistory ?? [], "") };
 }
 
 async function currentUser(request: Request) {
@@ -135,26 +147,30 @@ async function syncState(roomId: string, state: GameState) {
   if (secret.error) throw secret.error;
 }
 
-function uniquePlayerName(requested: string, existing: string[], fallbackNumber: number): string {
-  const used = new Set(existing.map((name) => name.trim().toLowerCase()));
-  const requestedName = requested.trim().slice(0, 22);
-  const base = requestedName || `Guest ${fallbackNumber}`;
-  if (!used.has(base.toLowerCase())) return base;
+function requestedCharacter(characterId: string) {
+  const character = CHARACTERS.find((candidate) => candidate.id === characterId);
+  if (!character) throw new Error("Choose one of the available suspects before entering the room.");
+  return character;
+}
 
-  for (let suffix = 2; suffix < 100; suffix += 1) {
-    const ending = ` ${suffix}`;
-    const candidate = `${base.slice(0, 22 - ending.length)}${ending}`;
-    if (!used.has(candidate.toLowerCase())) return candidate;
-  }
+function usedCharacterIds(state: GameState): Set<string> {
+  const ids = state.players
+    .map((player, index) => player.characterId || findCharacterByName(player.name)?.id || CHARACTERS[index]?.id)
+    .filter((id): id is string => Boolean(id));
+  return new Set(ids);
+}
 
-  return `Guest ${fallbackNumber}`;
+function ensureCharacterAvailable(state: GameState, characterId: string) {
+  const character = requestedCharacter(characterId);
+  if (usedCharacterIds(state).has(character.id)) throw new Error(`${character.name} is already being played in this room. Choose another suspect.`);
+  return character;
 }
 
 async function createRoom(userId: string, action: Extract<Action, { type: "create" }>) {
   const roomCode = await generateRoomCode();
   const settings: RuleSettings = { ...DEFAULT_RULES, ...(action.settings ?? {}) };
-  const displayName = uniquePlayerName(action.displayName, [], 1);
-  const state = createGame(roomCode, action.roomName.trim().slice(0, 36) || "The Unnamed Estate", [{ id: userId, name: displayName }], settings);
+  const character = requestedCharacter(action.characterId);
+  const state = createGame(roomCode, action.roomName.trim().slice(0, 36) || "The Unnamed Estate", [{ id: userId, characterId: character.id }], settings);
   const room = await admin.from("clue_rooms").insert({ code: roomCode, room_name: state.roomName, host_id: userId, phase: state.phase, public_state: publicStoredState(state) }).select("id").single();
   if (room.error) throw room.error;
   const roomId = room.data.id as string;
@@ -173,8 +189,8 @@ async function joinRoom(userId: string, action: Extract<Action, { type: "join" }
   if (state.players.some((player) => player.id === userId)) return { roomCode: state.roomCode, state: publicState(state, userId) };
   if (state.phase !== "lobby") throw new Error("This game has already started.");
   if (state.players.length >= 7) throw new Error("This room is full.");
-  const displayName = uniquePlayerName(action.displayName, state.players.map((player) => player.name), state.players.length + 1);
-  const next = addPlayer(state, { id: userId, name: displayName });
+  const character = ensureCharacterAvailable(state, action.characterId);
+  const next = addPlayer(state, { id: userId, characterId: character.id });
   await syncState(loaded.room.id, next);
   return { roomCode: next.roomCode, state: publicState(next, userId) };
 }

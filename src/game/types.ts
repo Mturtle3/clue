@@ -22,15 +22,52 @@ export type RoomId =
   | "kitchen";
 
 export type Position = {
-  roomId: RoomId;
+  roomId: RoomId | null;
   step: number;
   tileIndex: number;
+  inRoom: boolean;
 };
 
 export type PlayerColor = "coral" | "gold" | "mint" | "violet" | "sky" | "rose" | "lime";
 
+export type CharacterId =
+  | "suspect-scarlet"
+  | "suspect-mustard"
+  | "suspect-white"
+  | "suspect-green"
+  | "suspect-peacock"
+  | "suspect-plum"
+  | "suspect-orchid";
+
+export type CharacterDefinition = {
+  id: CharacterId;
+  name: string;
+  color: PlayerColor;
+  glyph: string;
+};
+
+export const CHARACTERS: CharacterDefinition[] = [
+  { id: "suspect-scarlet", name: "Miss Scarlet", color: "coral", glyph: "✦" },
+  { id: "suspect-mustard", name: "Colonel Mustard", color: "gold", glyph: "♟" },
+  { id: "suspect-white", name: "Mrs. White", color: "sky", glyph: "❖" },
+  { id: "suspect-green", name: "Mr. Green", color: "mint", glyph: "♣" },
+  { id: "suspect-peacock", name: "Mrs. Peacock", color: "violet", glyph: "◈" },
+  { id: "suspect-plum", name: "Professor Plum", color: "rose", glyph: "✧" },
+  { id: "suspect-orchid", name: "Dr. Orchid", color: "lime", glyph: "✤" },
+];
+
+export function getCharacter(characterId?: string, fallbackIndex = 0): CharacterDefinition {
+  return CHARACTERS.find((character) => character.id === characterId) ?? CHARACTERS[Math.max(0, fallbackIndex) % CHARACTERS.length];
+}
+
+export function findCharacterByName(name?: string): CharacterDefinition | undefined {
+  const normalized = name?.trim().toLowerCase();
+  return CHARACTERS.find((character) => character.name.toLowerCase() === normalized);
+}
+
 export type Player = {
   id: string;
+  characterId: CharacterId;
   name: string;
   color: PlayerColor;
   isHost: boolean;
@@ -47,6 +84,8 @@ export type RuleSettings = {
   expansionCards: boolean;
   finalAccusationAnytime: boolean;
   allowChat: boolean;
+  noRepeatRoomSuggestions: boolean;
+  moveSuggestedCharacter: boolean;
   turnTimer: number;
 };
 
@@ -58,8 +97,21 @@ export type Suggestion = {
   responderIds: string[];
   responderIndex: number;
   status: "waiting" | "resolved" | "no-match";
+  movedPlayerId?: string;
   shownToPlayerId?: string;
   shownCardId?: string;
+};
+
+export type SuggestionHistoryEntry = {
+  id: string;
+  byPlayerId: string;
+  suspectId: string;
+  weaponId: string;
+  roomId: RoomId;
+  result: "shown" | "no-match";
+  shownToPlayerId?: string;
+  shownCardId?: string;
+  timestamp: number;
 };
 
 export type EventTone = "gold" | "rose" | "mint" | "blue" | "slate";
@@ -91,6 +143,8 @@ export type GameState = {
   movesLeft: number;
   lastRoll: number | null;
   suggestion: Suggestion | null;
+  suggestionHistory: SuggestionHistoryEntry[];
+  lastSuggestionRoomByPlayer: Record<string, RoomId>;
   solution: string[];
   hands: Record<string, string[]>;
   notes: Record<string, Record<string, "unknown" | "maybe" | "ruled-out" | "found">>;
@@ -118,6 +172,8 @@ export const DEFAULT_RULES: RuleSettings = {
   expansionCards: true,
   finalAccusationAnytime: false,
   allowChat: true,
+  noRepeatRoomSuggestions: true,
+  moveSuggestedCharacter: true,
   turnTimer: 0,
 };
 

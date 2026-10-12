@@ -6,9 +6,10 @@ The repository includes a local demo mode, so the interface can be tested before
 
 ## What is included
 
-- A tile-based mansion board where dice rolls control movement.
-- Detective names and distinct player colors at every table.
-- Suggestions, private card reveals, final accusations, event feed, private notes, and room chat.
+- A connected tile-based mansion board where dice rolls control movement, including marked secret passages.
+- Classic suspect selection: each detective gets a fixed name, color, and pawn.
+- Multiple guesses per turn, optional same-room repeat protection, and an optional rule to move the suggested suspect into the room.
+- Suggestions, private card reveals with automatic note tracking, final accusations, event feed, private notes, and room chat.
 - Room codes and anonymous guest sessions—friends do not create accounts.
 - Classic cards plus balanced Nexus expansion cards.
 - GitHub Pages deployment workflow.
