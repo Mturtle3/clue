@@ -1,6 +1,7 @@
 const root = document.getElementById("root");
 const CONFIG = window.CLUE_CONFIG || { supabaseUrl: "", supabaseAnonKey: "" };
 const LIVE_CONFIGURED = Boolean(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey);
+const LIVE_ROOM_STORAGE_KEY = "clue-nexus-live-room";
 
 const app = {
   screen: "home",
@@ -14,6 +15,9 @@ const app = {
   loading: false,
   error: "",
   notice: "",
+  liveRoomCode: "",
+  pollTimer: null,
+  liveRefreshInFlight: false,
 };
 
 const DEFAULT_RULES = { balancedDeck: true, expansionCards: true, finalAccusationAnytime: false, allowChat: true, turnTimer: 0 };
@@ -162,19 +166,110 @@ async function liveCall(action) {
   return result.data;
 }
 
+function rememberLiveRoom(roomCode) {
+  try { localStorage.setItem(LIVE_ROOM_STORAGE_KEY, JSON.stringify({ roomCode })); } catch { /* Storage can be unavailable in private browsing. */ }
+}
+
+function forgetLiveRoom() {
+  try { localStorage.removeItem(LIVE_ROOM_STORAGE_KEY); } catch { /* Storage can be unavailable in private browsing. */ }
+}
+
+function stopLiveUpdates() {
+  if (app.pollTimer) window.clearInterval(app.pollTimer);
+  app.pollTimer = null;
+  if (app.channel && app.supabase) void app.supabase.removeChannel(app.channel);
+  app.channel = null;
+  app.liveRoomCode = "";
+}
+
+function replaceLiveState(result, roomCode) {
+  if (!app.live || app.liveRoomCode !== roomCode) return false;
+  const nextState = result.state;
+  const changed = JSON.stringify(app.state) !== JSON.stringify(nextState);
+  app.state = nextState;
+  app.viewerId = nextState.myPlayerId || app.viewerId;
+  if (changed) render();
+  return changed;
+}
+
+async function refreshLiveState(roomCode, showError = false) {
+  if (!app.live || app.liveRoomCode !== roomCode || app.liveRefreshInFlight) return;
+  app.liveRefreshInFlight = true;
+  try {
+    const result = await liveCall({ type: "get", roomCode });
+    replaceLiveState(result, roomCode);
+  } catch (error) {
+    if (showError && app.live && app.liveRoomCode === roomCode) {
+      app.error = error.message;
+      render();
+    }
+  } finally {
+    app.liveRefreshInFlight = false;
+  }
+}
+
 async function subscribeLive(roomCode) {
   if (!app.supabase) return;
   if (app.channel) await app.supabase.removeChannel(app.channel);
-  app.channel = app.supabase.channel(`clue-room-${roomCode}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "clue_rooms", filter: `code=eq.${roomCode}` }, async () => {
-    try { const result = await liveCall({ type: "get", roomCode }); app.state = result.state; app.viewerId = result.state.myPlayerId || app.viewerId; render(); } catch (error) { app.error = error.message; render(); }
+  if (app.pollTimer) window.clearInterval(app.pollTimer);
+  app.liveRoomCode = roomCode;
+  app.channel = app.supabase.channel(`clue-room-${roomCode}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "clue_rooms", filter: `code=eq.${roomCode}` }, () => {
+    void refreshLiveState(roomCode, true);
   }).subscribe();
+
+  // Realtime is the fast path. The short polling fallback keeps the room live
+  // even when a browser, proxy, or Supabase channel misses a change event.
+  app.pollTimer = window.setInterval(() => { void refreshLiveState(roomCode); }, 1500);
 }
 
-async function enterLive(result) { app.state = result.state; app.viewerId = result.state.myPlayerId || ""; app.live = true; app.screen = "home"; app.error = ""; app.notice = `Room ${result.roomCode} is ready to share.`; render(); await subscribeLive(result.roomCode); }
-function enterDemo(result, notice) { app.state = result.state; app.viewerId = result.viewerId; app.live = false; app.screen = "home"; app.error = ""; app.notice = notice; render(); }
-function leaveRoom() { if (app.channel && app.supabase) void app.supabase.removeChannel(app.channel); app.channel = null; app.state = null; app.viewerId = ""; app.live = false; app.tab = "case"; app.modal = null; app.error = ""; app.notice = ""; render(); }
+async function enterLive(result) {
+  app.state = result.state;
+  app.viewerId = result.state.myPlayerId || "";
+  app.live = true;
+  app.screen = "home";
+  app.error = "";
+  app.notice = `Room ${result.roomCode} is ready to share.`;
+  rememberLiveRoom(result.roomCode);
+  render();
+  await subscribeLive(result.roomCode);
+}
 
-async function performLive(action) { try { const result = await liveCall({ ...action, roomCode: app.state.roomCode }); app.state = result.state; app.viewerId = result.state.myPlayerId || app.viewerId; app.error = ""; render(); } catch (error) { app.error = error.message; render(); } }
+function enterDemo(result, notice) {
+  stopLiveUpdates();
+  forgetLiveRoom();
+  app.state = result.state;
+  app.viewerId = result.viewerId;
+  app.live = false;
+  app.screen = "home";
+  app.error = "";
+  app.notice = notice;
+  render();
+}
+
+function leaveRoom() {
+  stopLiveUpdates();
+  forgetLiveRoom();
+  app.state = null;
+  app.viewerId = "";
+  app.live = false;
+  app.tab = "case";
+  app.modal = null;
+  app.error = "";
+  app.notice = "";
+  render();
+}
+
+async function performLive(action) {
+  try {
+    const result = await liveCall({ ...action, roomCode: app.state.roomCode });
+    const changed = replaceLiveState(result, app.state.roomCode);
+    app.error = "";
+    if (!changed) render();
+  } catch (error) {
+    app.error = error.message;
+    render();
+  }
+}
 function performLocal(transform, resolve = false) { const next = clone(app.state); app.state = transform(next); if (resolve) app.state = autoResolve(app.state); render(); }
 function act(type, payload = {}, localTransform = null, resolve = false) { if (app.live) void performLive({ type, ...payload }); else if (localTransform) performLocal(localTransform, resolve); }
 
@@ -425,4 +520,35 @@ setupView = function (kind) {
   return `<main class="setup-shell"><div class="setup-panel"><button class="back-link" data-screen="home">← Back to the foyer</button><div class="setup-heading"><div class="brand-lockup"><span class="brand-mark">✦</span><span>CLUE <em>NEXUS</em></span></div><p class="eyebrow">${create ? "Open a new case" : "Step into an open case"}</p><h1>${create ? "Set the table." : "What’s the room code?"}</h1><p>${create ? "Choose a name for the mansion. Your friends will join with a six-character code." : "Enter the code your host shared. No account, email, or password needed."}</p></div><form class="setup-form" id="${create ? "create-form" : "join-form"}">${create ? `<label><span>Mansion name <small>optional</small></span><input name="roomName" value="The Moonlit Estate" maxlength="36"></label>` : `<label><span>Room code</span><input class="code-input" name="roomCode" placeholder="A7K2QF" maxlength="6" required></label>`}${app.error ? `<div class="error-banner">${esc(app.error)}</div>` : ""}<button class="button button-primary button-full" type="submit" ${app.loading ? "disabled" : ""}>${app.loading ? "Unlocking the door…" : create ? "Create the room →" : "Enter the room →"}</button></form><div class="setup-note"><span>✦</span>${LIVE_CONFIGURED ? "Live multiplayer is configured. Player names will be assigned automatically." : "You are in demo mode until Supabase is connected."}</div></div><aside class="setup-aside"><div class="aside-quote">“The truth is hidden in plain sight.”</div><div class="aside-moon"></div><div class="aside-lines"><span></span><span></span><span></span></div><div class="aside-detail"><b>02—07</b><span>players per case</span></div></aside></main>`;
 };
 
+async function restoreLiveRoom() {
+  if (!LIVE_CONFIGURED) return;
+  let savedRoom;
+  try { savedRoom = JSON.parse(localStorage.getItem(LIVE_ROOM_STORAGE_KEY) || "null"); } catch { savedRoom = null; }
+  const roomCode = String(savedRoom?.roomCode || "").trim().toUpperCase();
+  if (!roomCode) return;
+
+  app.live = true;
+  app.liveRoomCode = roomCode;
+  try {
+    const result = await liveCall({ type: "get", roomCode });
+    app.state = result.state;
+    app.viewerId = result.state.myPlayerId || "";
+    app.screen = "home";
+    app.error = "";
+    app.notice = `Reconnected to room ${roomCode}.`;
+    render();
+    await subscribeLive(roomCode);
+  } catch {
+    stopLiveUpdates();
+    forgetLiveRoom();
+    app.live = false;
+    app.state = null;
+    app.viewerId = "";
+    app.error = "We could not reconnect to that room. Join again with the room code.";
+    app.screen = "join";
+    render();
+  }
+}
+
 render();
+void restoreLiveRoom();
