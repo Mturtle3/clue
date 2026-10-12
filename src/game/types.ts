@@ -100,6 +100,7 @@ export type Suggestion = {
   movedPlayerId?: string;
   shownToPlayerId?: string;
   shownCardId?: string;
+  shownByPlayerId?: string;
 };
 
 export type SuggestionHistoryEntry = {
@@ -111,6 +112,7 @@ export type SuggestionHistoryEntry = {
   result: "shown" | "no-match";
   shownToPlayerId?: string;
   shownCardId?: string;
+  shownByPlayerId?: string;
   timestamp: number;
 };
 

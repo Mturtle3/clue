@@ -1,6 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
-  addChatMessage,
   addPlayer,
   createGame,
   endTurn,
@@ -27,6 +26,7 @@ const corsHeaders = {
 type Action =
   | { type: "create"; roomName: string; characterId: string; settings?: Partial<RuleSettings> }
   | { type: "join"; roomCode: string; characterId: string }
+  | { type: "preview"; roomCode: string }
   | { type: "get"; roomCode: string }
   | { type: "ready"; roomCode: string }
   | { type: "settings"; roomCode: string; settings: Partial<RuleSettings> }
@@ -53,17 +53,17 @@ function json(data: unknown, status = 200): Response {
 
 function viewerSuggestion(suggestion: GameState["suggestion"], viewerId: string) {
   if (!suggestion) return null;
-  const { shownCardId: _shownCardId, ...safeSuggestion } = suggestion;
+  const { shownCardId: _shownCardId, shownByPlayerId: _shownByPlayerId, ...safeSuggestion } = suggestion;
   return suggestion.shownToPlayerId === viewerId && suggestion.shownCardId
-    ? { ...safeSuggestion, shownCardId: suggestion.shownCardId }
+    ? { ...safeSuggestion, shownCardId: suggestion.shownCardId, shownByPlayerId: suggestion.shownByPlayerId }
     : safeSuggestion;
 }
 
 function viewerHistory(history: GameState["suggestionHistory"] = [], viewerId = "") {
   return history.map((entry) => {
-    const { shownCardId: _shownCardId, ...safeEntry } = entry;
+    const { shownCardId: _shownCardId, shownByPlayerId: _shownByPlayerId, ...safeEntry } = entry;
     return entry.shownToPlayerId === viewerId && entry.shownCardId
-      ? { ...safeEntry, shownCardId: entry.shownCardId }
+      ? { ...safeEntry, shownCardId: entry.shownCardId, shownByPlayerId: entry.shownByPlayerId }
       : safeEntry;
   });
 }
@@ -166,6 +166,21 @@ function ensureCharacterAvailable(state: GameState, characterId: string) {
   return character;
 }
 
+function availableCharacterIds(state: GameState): string[] {
+  const used = usedCharacterIds(state);
+  return CHARACTERS.filter((character) => !used.has(character.id)).map((character) => character.id);
+}
+
+async function previewRoom(action: Extract<Action, { type: "preview" }>) {
+  const loaded = await loadRoom(action.roomCode);
+  if (loaded.state.phase !== "lobby") throw new Error("This game has already started.");
+  return {
+    roomCode: loaded.state.roomCode,
+    state: publicState(loaded.state, ""),
+    availableCharacterIds: availableCharacterIds(loaded.state),
+  };
+}
+
 async function createRoom(userId: string, action: Extract<Action, { type: "create" }>) {
   const roomCode = await generateRoomCode();
   const settings: RuleSettings = { ...DEFAULT_RULES, ...(action.settings ?? {}) };
@@ -198,6 +213,7 @@ async function joinRoom(userId: string, action: Extract<Action, { type: "join" }
 async function dispatch(userId: string, action: Action) {
   if (action.type === "create") return createRoom(userId, action);
   if (action.type === "join") return joinRoom(userId, action);
+  if (action.type === "preview") return previewRoom(action);
   if (!("roomCode" in action)) throw new Error("A room code is required.");
   const loaded = await loadRoom(action.roomCode);
   await ensureMember(loaded.room.id, userId);
@@ -235,9 +251,6 @@ async function dispatch(userId: string, action: Action) {
       break;
     case "end_turn":
       next = endTurn(next, userId);
-      break;
-    case "chat":
-      next = addChatMessage(next, userId, action.text);
       break;
     default:
       throw new Error("Unknown action.");

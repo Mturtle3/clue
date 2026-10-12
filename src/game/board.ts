@@ -1,4 +1,4 @@
-import type { RoomId } from "./types.ts";
+import type { CharacterId, RoomId } from "./types.ts";
 
 export type RoomMeta = {
   id: RoomId;
@@ -48,18 +48,43 @@ export const ROOM_IDS: RoomId[] = [
 
 type GridPoint = [number, number];
 
-// This follows the classic Clue silhouette: rooms sit around a connected
-// hallway network instead of being arranged on one artificial outer loop.
+// The interactive spaces follow the 25 x 25 footprint of a classic Clue
+// board. The supplied board artwork supplies the room walls and labels; this
+// grid supplies the real spaces players can walk through.
 const ROOM_POINTS: Record<RoomId, GridPoint> = {
-  kitchen: [4, 4],
-  ballroom: [12, 4],
-  conservatory: [20, 4],
-  dining: [4, 12],
-  billiard: [20, 12],
-  library: [20, 17],
-  lounge: [4, 20],
-  hall: [12, 20],
-  study: [20, 20],
+  kitchen: [3, 3],
+  ballroom: [12, 3],
+  conservatory: [21, 3],
+  dining: [3, 10],
+  billiard: [21, 10],
+  library: [21, 16],
+  lounge: [3, 21],
+  hall: [12, 21],
+  study: [21, 21],
+};
+
+const ROOM_BOXES: Record<RoomId, [number, number, number, number]> = {
+  kitchen: [1, 5, 1, 5],
+  ballroom: [8, 16, 1, 5],
+  conservatory: [19, 23, 1, 5],
+  dining: [1, 5, 8, 13],
+  billiard: [19, 23, 8, 13],
+  library: [19, 23, 14, 18],
+  lounge: [1, 5, 19, 23],
+  hall: [8, 16, 18, 23],
+  study: [19, 23, 20, 23],
+};
+
+const ROOM_DOORS: Record<RoomId, GridPoint[]> = {
+  kitchen: [[6, 3], [3, 6]],
+  ballroom: [[7, 3], [17, 3], [12, 6]],
+  conservatory: [[18, 3], [21, 6]],
+  dining: [[6, 10], [3, 7], [3, 14]],
+  billiard: [[18, 10], [21, 7], [21, 13]],
+  library: [[18, 16], [21, 13], [21, 19]],
+  lounge: [[6, 21], [3, 18]],
+  hall: [[7, 21], [17, 21], [12, 17]],
+  study: [[18, 21], [21, 19]],
 };
 
 const CORRIDOR_LINKS: Array<[RoomId, RoomId]> = [
@@ -81,44 +106,55 @@ export const SECRET_PASSAGES: Array<[RoomId, RoomId]> = [
   ["lounge", "conservatory"],
 ];
 
-const toPercent = (value: number): number => 4 + (value - 1) * 4;
 const keyFor = (x: number, y: number): string => `${x}:${y}`;
+const blocked = new Set<string>();
+for (let row = 8; row <= 16; row += 1) for (let column = 8; column <= 16; column += 1) blocked.add(keyFor(column, row));
+
+const toPercent = (value: number): number => 2 + value * 4;
 
 const points = new Map<string, { x: number; y: number; roomId: RoomId | null; isRoom: boolean }>();
+
+for (let row = 0; row < 25; row += 1) {
+  for (let column = 0; column < 25; column += 1) {
+    if (blocked.has(keyFor(column, row))) continue;
+    const insideRoom = ROOM_IDS.some((roomId) => {
+      const [minX, maxX, minY, maxY] = ROOM_BOXES[roomId];
+      return column >= minX && column <= maxX && row >= minY && row <= maxY;
+    });
+    if (!insideRoom) points.set(keyFor(column, row), { x: toPercent(column), y: toPercent(row), roomId: null, isRoom: false });
+  }
+}
 
 for (const roomId of ROOM_IDS) {
   const [x, y] = ROOM_POINTS[roomId];
   points.set(keyFor(x, y), { x: toPercent(x), y: toPercent(y), roomId, isRoom: true });
 }
 
-function addSegment(fromRoom: RoomId, toRoom: RoomId): void {
-  const [fromX, fromY] = ROOM_POINTS[fromRoom];
-  const [toX, toY] = ROOM_POINTS[toRoom];
-  if (fromX !== toX && fromY !== toY) throw new Error(`Board connection must be straight: ${fromRoom} -> ${toRoom}`);
-  const steps = Math.max(Math.abs(toX - fromX), Math.abs(toY - fromY));
-  const stepX = Math.sign(toX - fromX);
-  const stepY = Math.sign(toY - fromY);
-  for (let step = 0; step <= steps; step += 1) {
-    const x = fromX + stepX * step;
-    const y = fromY + stepY * step;
-    const key = keyFor(x, y);
-    if (!points.has(key)) points.set(key, { x: toPercent(x), y: toPercent(y), roomId: null, isRoom: false });
-  }
-}
-
-for (const [from, to] of CORRIDOR_LINKS) addSegment(from, to);
-
 export const BOARD_TILES: BoardTile[] = Array.from(points.values()).map((point, id) => ({ ...point, id }));
 
-const tileAt = new Map<string, number>(BOARD_TILES.map((tile) => [keyFor(tile.x, tile.y), tile.id]));
+const tileAt = new Map<string, number>(Array.from(points.keys()).map((key, index) => [key, index]));
 const roomTile = (roomId: RoomId): number => {
   const [x, y] = ROOM_POINTS[roomId];
-  return tileAt.get(keyFor(toPercent(x), toPercent(y))) ?? -1;
+  return tileAt.get(keyFor(x, y)) ?? -1;
 };
 
 export const ROOM_TILE_INDEX: Record<RoomId, number> = Object.fromEntries(
   ROOM_IDS.map((roomId) => [roomId, roomTile(roomId)]),
 ) as Record<RoomId, number>;
+
+const START_TILE_POINTS: Record<CharacterId, GridPoint> = {
+  "suspect-scarlet": [7, 24],
+  "suspect-mustard": [0, 11],
+  "suspect-white": [7, 0],
+  "suspect-green": [24, 11],
+  "suspect-peacock": [17, 0],
+  "suspect-plum": [17, 24],
+  "suspect-orchid": [0, 16],
+};
+
+export const START_TILE_INDEX: Record<CharacterId, number> = Object.fromEntries(
+  Object.entries(START_TILE_POINTS).map(([characterId, [x, y]]) => [characterId, tileAt.get(keyFor(x, y)) ?? 0]),
+) as Record<CharacterId, number>;
 
 const graph = new Map<number, Set<number>>(BOARD_TILES.map((tile) => [tile.id, new Set<number>()]));
 
@@ -127,26 +163,19 @@ function connect(from: number, to: number): void {
   graph.get(to)?.add(from);
 }
 
-function segmentTileIds(fromRoom: RoomId, toRoom: RoomId): number[] {
-  const [fromX, fromY] = ROOM_POINTS[fromRoom];
-  const [toX, toY] = ROOM_POINTS[toRoom];
-  const steps = Math.max(Math.abs(toX - fromX), Math.abs(toY - fromY));
-  const stepX = Math.sign(toX - fromX);
-  const stepY = Math.sign(toY - fromY);
-  return Array.from({ length: steps + 1 }, (_, step) => {
-    const x = toPercent(fromX + stepX * step);
-    const y = toPercent(fromY + stepY * step);
-    const id = tileAt.get(keyFor(x, y));
-    if (id === undefined) throw new Error(`Missing board tile at ${x},${y}`);
-    return id;
+for (const [key, tileId] of tileAt.entries()) {
+  const [x, y] = key.split(":").map(Number);
+  [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]].forEach(([nextX, nextY]) => {
+    const nextId = tileAt.get(keyFor(nextX, nextY));
+    if (nextId !== undefined) connect(tileId, nextId);
   });
 }
 
-const corridorConnections: BoardConnection[] = [];
-for (const [fromRoom, toRoom] of CORRIDOR_LINKS) {
-  const ids = segmentTileIds(fromRoom, toRoom);
-  for (let index = 1; index < ids.length; index += 1) connect(ids[index - 1], ids[index]);
-  corridorConnections.push({ from: ROOM_TILE_INDEX[fromRoom], to: ROOM_TILE_INDEX[toRoom] });
+for (const roomId of ROOM_IDS) {
+  for (const [x, y] of ROOM_DOORS[roomId]) {
+    const doorId = tileAt.get(keyFor(x, y));
+    if (doorId !== undefined) connect(ROOM_TILE_INDEX[roomId], doorId);
+  }
 }
 
 const passageConnections: BoardConnection[] = SECRET_PASSAGES.map(([fromRoom, toRoom]) => {
@@ -156,7 +185,7 @@ const passageConnections: BoardConnection[] = SECRET_PASSAGES.map(([fromRoom, to
   return { from, to, secret: true };
 });
 
-export const BOARD_CONNECTIONS: BoardConnection[] = [...corridorConnections, ...passageConnections];
+export const BOARD_CONNECTIONS: BoardConnection[] = passageConnections;
 export const BOARD_GRAPH: Record<number, number[]> = Object.fromEntries(
   Array.from(graph.entries()).map(([id, neighbors]) => [id, Array.from(neighbors)]),
 );

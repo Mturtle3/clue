@@ -1,5 +1,5 @@
 import { BASE_CARDS, cardsForPlayerCount, getCard } from "./cards.ts";
-import { BOARD_TILES, ROOM_IDS, ROOM_TILE_INDEX, normalizeTileIndex, roomName, tileDistance } from "./board.ts";
+import { BOARD_TILES, ROOM_IDS, ROOM_TILE_INDEX, START_TILE_INDEX, normalizeTileIndex, roomName, tileDistance } from "./board.ts";
 import type {
   CardCategory,
   CharacterId,
@@ -136,7 +136,12 @@ export function startGame(state: GameState): GameState {
   const dealtState = refreshHands({ ...state, phase: "lobby" });
   const refreshed = dealtState.players.map((player, index) => {
     const character = getCharacter(player.characterId, index);
-    const tileIndex = normalizeTileIndex(player.position.tileIndex, player.position.roomId, index);
+    const startTileIndex = START_TILE_INDEX[character.id];
+    const tileIndex = startTileIndex !== undefined
+      ? startTileIndex
+      : player.position.inRoom && player.position.roomId
+      ? ROOM_TILE_INDEX[player.position.roomId]
+      : normalizeTileIndex(player.position.tileIndex, player.position.roomId, index);
     const tile = BOARD_TILES[tileIndex];
     return {
       ...player,
@@ -145,7 +150,7 @@ export function startGame(state: GameState): GameState {
       color: character.color,
       ready: true,
       cardCount: dealtState.hands[player.id]?.length ?? 0,
-      position: { ...player.position, roomId: tile.roomId ?? player.position.roomId, tileIndex, step: 0, inRoom: tile.isRoom },
+      position: { ...player.position, roomId: tile.roomId, tileIndex, step: 0, inRoom: tile.isRoom },
     };
   });
   return {
@@ -279,6 +284,7 @@ function addSuggestionHistory(
   suggestion: Suggestion,
   result: SuggestionHistoryEntry["result"],
   shownCardId?: string,
+  shownByPlayerId?: string,
 ): SuggestionHistoryEntry[] {
   return [
     ...(state.suggestionHistory ?? []),
@@ -291,6 +297,7 @@ function addSuggestionHistory(
       result,
       shownToPlayerId: shownCardId ? suggestion.byPlayerId : undefined,
       shownCardId,
+      shownByPlayerId,
       timestamp: now(),
     },
   ].slice(-50);
@@ -356,8 +363,8 @@ export function submitSuggestionResponse(state: GameState, responderId: string, 
   if (cardId) {
     return {
       ...state,
-      suggestion: { ...suggestion, status: "resolved", shownToPlayerId: suggestion.byPlayerId, shownCardId: cardId },
-      suggestionHistory: addSuggestionHistory(state, suggestion, "shown", cardId),
+      suggestion: { ...suggestion, status: "resolved", shownToPlayerId: suggestion.byPlayerId, shownCardId: cardId, shownByPlayerId: responderId },
+      suggestionHistory: addSuggestionHistory(state, suggestion, "shown", cardId, responderId),
       events: [event(`${responder.name} quietly answered the suggestion.`, "blue"), ...state.events].slice(0, 30),
     };
   }
