@@ -20,6 +20,7 @@ const app = {
   joinPreview: null,
   pollTimer: null,
   liveRefreshInFlight: false,
+  lastShownNoticeKey: "",
 };
 
 const DEFAULT_RULES = {
@@ -85,7 +86,7 @@ const ROOM_META = {
   study: ["Study", "quiet papers", "⌂", 86, 86, "violet"],
   hall: ["Hall", "long shadows", "╋", 50, 86, "slate"],
   lounge: ["Lounge", "low voices", "◒", 14, 86, "rose"],
-  library: ["Library", "locked spines", "▤", 86, 66, "sky"],
+  library: ["Library", "locked spines", "▤", 50, 50, "sky"],
   billiard: ["Billiard Room", "one ball short", "●", 86, 42, "lime"],
   dining: ["Dining Room", "place settings", "⌁", 14, 42, "gold"],
   conservatory: ["Conservatory", "rain on glass", "❀", 86, 14, "mint"],
@@ -101,17 +102,17 @@ const CORRIDOR_LINKS = [
 const SECRET_PASSAGES = [["kitchen", "study"], ["lounge", "conservatory"]];
 const ROOM_POINTS = {
   kitchen: [3, 3], ballroom: [12, 3], conservatory: [21, 3], dining: [3, 10], billiard: [21, 10],
-  library: [21, 16], lounge: [3, 21], hall: [12, 21], study: [21, 21],
+  library: [12, 12], lounge: [3, 21], hall: [12, 21], study: [21, 21],
 };
 const CLASSIC_ROOM_BOXES = {
   kitchen: [1, 5, 1, 5], ballroom: [8, 16, 1, 5], conservatory: [19, 23, 1, 5],
-  dining: [1, 5, 8, 13], billiard: [19, 23, 8, 13], library: [19, 23, 14, 18],
+  dining: [1, 5, 8, 13], billiard: [19, 23, 8, 13], library: [8, 16, 8, 16],
   lounge: [1, 5, 19, 23], hall: [8, 16, 18, 23], study: [19, 23, 20, 23],
 };
 const CLASSIC_DOORS = {
   kitchen: [[6, 3], [3, 6]], ballroom: [[7, 3], [17, 3], [12, 6]], conservatory: [[18, 3], [21, 6]],
   dining: [[6, 10], [3, 7], [3, 14]], billiard: [[18, 10], [21, 7], [21, 13]],
-  library: [[18, 16], [21, 13], [21, 19]], lounge: [[6, 21], [3, 18]],
+  library: [[7, 12], [17, 12], [12, 7], [12, 17]], lounge: [[6, 21], [3, 18]],
   hall: [[7, 21], [17, 21], [12, 17]], study: [[18, 21], [21, 19]],
 };
 const BLOCKED_CELLS = new Set();
@@ -336,7 +337,8 @@ function playerInRoom(player) {
 }
 function finishMovement(state, playerId) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.movesLeft <= 0 || state.suggestion?.status === "waiting") return state; state.movesLeft = 0; state.events.unshift(eventLog(`${player.name} finished moving.`, "slate")); return state; }
 function endTurn(state, playerId) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.movesLeft > 0 || state.suggestion?.status === "waiting") return state; state.currentPlayerIndex = nextActiveIndex(state, state.currentPlayerIndex); state.lastRoll = null; state.movesLeft = 0; state.suggestion = null; state.events.unshift(eventLog(`${currentPlayer(state).name}'s turn.`, "gold")); return state; }
-function matchingCards(hand, suggestion) { return (hand || []).filter((id) => [suggestion.suspectId, suggestion.weaponId, suggestion.roomId].includes(id)); }
+function suggestionCardIds(suggestion) { return [suggestion.suspectId, suggestion.weaponId, `room-${suggestion.roomId}`]; }
+function matchingCards(hand, suggestion) { return (hand || []).filter((id) => suggestionCardIds(suggestion).includes(id)); }
 function addSuggestionHistory(state, suggestion, result, shownCardId, shownByPlayerId) {
   state.suggestionHistory = [...(state.suggestionHistory || []), {
     id: uid("suggestion"),
@@ -396,7 +398,6 @@ function respond(state, responderId, cardId) {
     suggestion.shownByPlayerId = responderId;
     addSuggestionHistory(state, suggestion, "shown", cardId, responderId);
     state.events.unshift(eventLog("A detective quietly answered the suggestion.", "blue"));
-    rememberShownCard(state);
     return state;
   }
   suggestion.responderIndex += 1;
@@ -626,7 +627,7 @@ function gameView(state) {
   const adjacent = ROOM_GRAPH[currentRoom] || [];
   const responderId = state.suggestion?.status === "waiting" ? state.suggestion.responderIds[state.suggestion.responderIndex] : null;
   const responder = state.players.find((player) => player.id === responderId);
-  const responseCards = responderId === app.viewerId && state.suggestion ? myHand.filter((id) => [state.suggestion.suspectId, state.suggestion.weaponId, state.suggestion.roomId].includes(id)) : [];
+  const responseCards = responderId === app.viewerId && state.suggestion ? myHand.filter((id) => suggestionCardIds(state.suggestion).includes(id)) : [];
   const allSuspects = ALL_CARDS.filter((item) => item.category === "suspect");
   const allWeapons = ALL_CARDS.filter((item) => item.category === "weapon");
   const allRooms = ROOM_IDS;
@@ -655,7 +656,7 @@ function caseTab(state, me, myHand, isMyTurn) {
 
 function notesTab(myHand, myNotes) {
   const activeCards = activeDeckCards(app.state);
-  return `<div class="side-tab-content notes-tab"><div class="notes-intro"><span class="notebook-icon">☷</span><div><strong>Private notebook</strong><p>Only cards in this game's deck are listed. Your hand and private reveals are marked automatically.</p></div></div>${["suspect", "room", "weapon"].map((category) => `<div class="notes-group"><span class="section-kicker">${category === "suspect" ? "PEOPLE" : category === "room" ? "PLACES" : "OBJECTS"}</span>${activeCards.filter((item) => item.category === category).map((item) => { const value = myHand.includes(item.id) ? "found" : myNotes[item.id] || "unknown"; const display = value === "found" ? "●" : value === "maybe" ? "?" : value === "ruled-out" ? "×" : ""; return `<button class="note-line note-${value}" data-note-card="${item.id}"><span class="mini-card-icon tone-${item.tone}">${item.glyph}</span><span>${item.name}</span><i>${display}</i></button>`; }).join("")}</div>`).join("")}</div>`;
+  return `<div class="side-tab-content notes-tab"><div class="notes-intro"><span class="notebook-icon">☷</span><div><strong>Private notebook</strong><p>Only cards in this game's deck are listed. Your hand and private reveals are marked automatically.</p></div></div>${["suspect", "room", "weapon"].map((category) => `<div class="notes-group"><span class="section-kicker">${category === "suspect" ? "PEOPLE" : category === "room" ? "PLACES" : "OBJECTS"}</span>${activeCards.filter((item) => item.category === category).map((item) => { const inHand = myHand.includes(item.id); const value = inHand ? "found" : myNotes[item.id] || "unknown"; const display = inHand ? "YOUR CARD" : value === "found" ? "KNOWN" : value === "maybe" ? "POSSIBLE" : value === "ruled-out" ? "RULED OUT" : "UNMARKED"; return `<button class="note-line note-${value}" data-note-card="${item.id}"><span class="mini-card-icon tone-${item.tone}">${item.glyph}</span><span>${item.name}</span><i>${display}</i></button>`; }).join("")}</div>`).join("")}</div>`;
 }
 
 function chatTab(state) {
@@ -676,7 +677,11 @@ function selectionModal(kind) {
   const suggest = kind === "suggest";
   const me = app.state.players.find((player) => player.id === app.viewerId);
   const room = me?.position.roomId || "study";
-  return `<div class="modal-backdrop" data-action="close-modal"><div class="selection-modal" data-modal-panel><button class="modal-close" data-action="close-modal">×</button><span class="modal-sigil">✦</span><p class="eyebrow">A theory takes shape</p><h2>${suggest ? `Suggest in the ${roomName(room)}` : "Make a final accusation"}</h2><p class="modal-subtitle">${suggest ? "Choose one suspect and one weapon. The room is set by your location." : "One chance. Check your notes before you commit."}</p><label><span>Person</span><select id="modal-suspect">${ALL_CARDS.filter((item) => item.category === "suspect").map((item) => `<option value="${item.id}">${item.name}</option>`).join("")}</select></label>${suggest ? "" : `<label><span>Place</span><select id="modal-room">${ROOM_IDS.map((id) => `<option value="${id}" ${id === room ? "selected" : ""}>${roomName(id)}</option>`).join("")}</select></label>`}<label><span>Object</span><select id="modal-weapon">${ALL_CARDS.filter((item) => item.category === "weapon").map((item) => `<option value="${item.id}">${item.name}</option>`).join("")}</select></label><button class="button button-primary button-full" data-action="confirm-${kind}">${suggest ? "Make suggestion" : "Accuse"} →</button></div></div>`;
+  const deckCards = activeDeckCards(app.state);
+  const suspects = deckCards.filter((item) => item.category === "suspect");
+  const weapons = deckCards.filter((item) => item.category === "weapon");
+  const rooms = ROOM_IDS.filter((id) => deckCards.some((item) => item.id === `room-${id}`));
+  return `<div class="modal-backdrop" data-action="close-modal"><div class="selection-modal" data-modal-panel><button class="modal-close" data-action="close-modal">×</button><span class="modal-sigil">✦</span><p class="eyebrow">A theory takes shape</p><h2>${suggest ? `Suggest in the ${roomName(room)}` : "Make a final accusation"}</h2><p class="modal-subtitle">${suggest ? "Choose one suspect and one weapon from this table's active deck. The room is set by your location." : "One chance. Choose only from this table's active cards, then commit."}</p><label><span>Person</span><select id="modal-suspect">${suspects.map((item) => `<option value="${item.id}">${item.name}</option>`).join("")}</select></label>${suggest ? "" : `<label><span>Place</span><select id="modal-room">${rooms.map((id) => `<option value="${id}" ${id === room ? "selected" : ""}>${roomName(id)}</option>`).join("")}</select></label>`}<label><span>Object</span><select id="modal-weapon">${weapons.map((item) => `<option value="${item.id}">${item.name}</option>`).join("")}</select></label><button class="button button-primary button-full" data-action="confirm-${kind}">${suggest ? "Make suggestion" : "Accuse"} →</button></div></div>`;
 }
 
 function globalOverlay() {
@@ -807,7 +812,7 @@ root.addEventListener("change", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLSelectElement)) return;
   if (target.dataset.cardOwner) { setCardOwner(target.dataset.cardOwner, target.value); return; }
-  if (target.dataset.action === "switch-player") { app.viewerId = target.value; render(); }
+  if (target.dataset.action === "switch-player") { app.viewerId = target.value; rememberShownCard(app.state); render(); }
 });
 
 root.addEventListener("submit", async (event) => {
@@ -895,11 +900,19 @@ function tileConnectionsMarkup() {
 }
 
 function boardRoomsMarkup() {
-  return ROOM_IDS.map((roomId) => {
+  const rooms = ROOM_IDS.map((roomId) => {
     const [minX, maxX, minY, maxY] = CLASSIC_ROOM_BOXES[roomId];
     const meta = ROOM_META[roomId];
     return `<div class="board-room room-${roomId} tile-${meta[5]}" style="left:${minX * 4}%;top:${minY * 4}%;width:${(maxX - minX + 1) * 4}%;height:${(maxY - minY + 1) * 4}%" aria-hidden="true"><b class="board-room-glyph">${esc(meta[2])}</b><span>${esc(meta[0])}</span><small>${esc(meta[1])}</small></div>`;
   }).join("");
+  return rooms + boardDoorsMarkup();
+}
+
+function boardDoorsMarkup() {
+  return ROOM_IDS.flatMap((roomId) => (CLASSIC_DOORS[roomId] || []).map(([x, y]) => {
+    const meta = ROOM_META[roomId];
+    return `<span class="board-door" style="left:${toBoardPercent(x)}%;top:${toBoardPercent(y)}%" title="${esc(meta[0])} door" aria-label="${esc(meta[0])} door"><i></i></span>`;
+  })).join("");
 }
 
 function boardTileMarkup(state, tile, reachable, isMyTurn) {
@@ -965,9 +978,8 @@ function notebookCardMarkup(state, item, myHand, myNotes, owners) {
   const inHand = myHand.includes(item.id);
   const note = inHand ? "found" : myNotes[item.id] || "unknown";
   const ownerId = inHand ? app.viewerId : owners[item.id] || "";
-  const status = inHand ? "YOUR CARD" : ownerId ? playerNameForOwner(state, ownerId) : note === "found" ? "KNOWN" : note === "maybe" ? "MAYBE" : note === "ruled-out" ? "OUT" : "—";
-  const mark = inHand || note === "found" ? "●" : note === "maybe" ? "?" : note === "ruled-out" ? "×" : "";
-  return `<div class="notebook-card note-${note} ${inHand ? "owned" : ""}"><button class="notebook-mark" data-note-card="${item.id}" title="${inHand ? "This card is in your hand" : "Tap to cycle unknown, possible, ruled out"}"><span class="notebook-card-glyph">${item.glyph}</span><span class="notebook-card-copy"><strong>${esc(item.name)}</strong><small>${item.expansion ? "Added for this table" : "Classic card"}</small></span><b>${mark || status}</b></button>${notebookOwnerMarkup(state, item, myHand, owners)}</div>`;
+  const mark = inHand ? "YOUR CARD" : note === "found" ? "KNOWN" : note === "maybe" ? "POSSIBLE" : note === "ruled-out" ? "RULED OUT" : "UNMARKED";
+  return `<div class="notebook-card note-${note} ${inHand ? "owned" : ""}"><button class="notebook-mark" data-note-card="${item.id}" title="${inHand ? "This card is in your hand" : "Tap to cycle unknown, possible, ruled out"}"><span class="notebook-card-glyph">${item.glyph}</span><span class="notebook-card-copy"><strong>${esc(item.name)}</strong><small>${item.expansion ? "Added for this table" : "Classic card"}</small></span><b>${mark}</b></button>${notebookOwnerMarkup(state, item, myHand, owners)}</div>`;
 }
 
 function cleanNotebookMarkup(state, myHand, myNotes) {
@@ -979,7 +991,7 @@ function cleanNotebookMarkup(state, myHand, myNotes) {
   const cards = activeDeckCards(state);
   const owners = getCardOwners(state);
   const knownCount = cards.filter((item) => myHand.includes(item.id) || myNotes[item.id] === "found" || owners[item.id]).length;
-  return `<details class="case-notebook" open><summary><span class="notebook-summary-icon">☷</span><span class="notebook-summary-copy"><strong>Private detective notebook</strong><small>${cards.length} cards in this case · ${knownCount} tracked</small></span><span class="notebook-summary-action">tap to fold</span></summary><div class="notebook-body"><p class="notebook-explainer">Only this game's active deck is listed. The three envelope cards stay hidden. Click a card to mark it, then assign who you think holds it.</p><div class="notebook-legend"><span><b class="legend-known">●</b> known</span><span><b class="legend-maybe">?</b> possible</span><span><b class="legend-out">×</b> ruled out</span><span><b class="legend-owner">▾</b> owner</span></div><div class="notebook-groups">${groups.map(([category, label]) => `<section class="notebook-group"><h3>${label}</h3><div class="notebook-card-list">${cards.filter((item) => item.category === category).map((item) => notebookCardMarkup(state, item, myHand, myNotes, owners)).join("") || `<span class="notebook-empty">No ${label.toLowerCase()} are in this deck.</span>`}</div></section>`).join("")}</div></div></details>`;
+  return `<details class="case-notebook" open><summary><span class="notebook-summary-icon">☷</span><span class="notebook-summary-copy"><strong>Private detective notebook</strong><small>${cards.length} cards in this case · ${knownCount} tracked</small></span><span class="notebook-summary-action">tap to fold</span></summary><div class="notebook-body"><p class="notebook-explainer">Only this game's active deck is listed. The three envelope cards stay hidden. Click a named card to cycle its color: possible, ruled out, or known.</p><div class="notebook-legend"><span><b class="legend-known"></b> known / your card</span><span><b class="legend-maybe"></b> possible</span><span><b class="legend-out"></b> ruled out</span><span><b class="legend-owner"></b> owner assigned</span></div><div class="notebook-groups">${groups.map(([category, label]) => `<section class="notebook-group"><h3>${label}</h3><div class="notebook-card-list">${cards.filter((item) => item.category === category).map((item) => notebookCardMarkup(state, item, myHand, myNotes, owners)).join("") || `<span class="notebook-empty">No ${label.toLowerCase()} are in this deck.</span>`}</div></section>`).join("")}</div></div></details>`;
 }
 
 function compactHandCard(id, note) {
@@ -1014,6 +1026,9 @@ function rememberShownCard(state) {
   const cardId = suggestion?.shownToPlayerId === app.viewerId ? suggestion.shownCardId : latestShown?.shownCardId;
   if (!state || !cardId) return;
   const ownerId = suggestion?.shownToPlayerId === app.viewerId ? suggestion.shownByPlayerId : latestShown?.shownByPlayerId;
+  const noticeKey = `${state.roomCode}:${latestShown?.id || `${suggestion?.byPlayerId || ""}:${cardId}`}`;
+  const shouldAnnounce = app.lastShownNoticeKey !== noticeKey;
+  app.lastShownNoticeKey = noticeKey;
   if (ownerId) {
     const owners = { ...getCardOwners(state), [cardId]: ownerId };
     saveCardOwners(state, owners);
@@ -1021,13 +1036,15 @@ function rememberShownCard(state) {
   if (app.live) {
     const key = `clue-nexus-notes-${state.roomCode}-${app.viewerId}`;
     const notes = getLiveNotes(state);
-    if (notes[cardId] === "found") return;
-    const next = { ...notes, [cardId]: "found" };
-    try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* Notes still show in this render. */ }
-    state.myNotes = next;
+    if (notes[cardId] !== "found") {
+      const next = { ...notes, [cardId]: "found" };
+      try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* Notes still show in this render. */ }
+      state.myNotes = next;
+    }
   } else {
     state.notes = { ...(state.notes || {}), [app.viewerId]: { ...(state.notes?.[app.viewerId] || {}), [cardId]: "found" } };
   }
+  if (shouldAnnounce) flash(`You were shown ${cardName(cardId)}. Your journal has been updated.`);
 }
 
 function cleanSuggestionRows(state) {
@@ -1050,7 +1067,7 @@ gameView = function (state) {
   const reachable = isMyTurn && state.movesLeft > 0 ? reachableTileDistances(currentTile, state.movesLeft) : new Map();
   const responderId = state.suggestion?.status === "waiting" ? state.suggestion.responderIds[state.suggestion.responderIndex] : null;
   const responder = state.players.find((player) => player.id === responderId);
-  const responseCards = responderId === app.viewerId && state.suggestion ? myHand.filter((id) => [state.suggestion.suspectId, state.suggestion.weaponId, state.suggestion.roomId].includes(id)) : [];
+  const responseCards = responderId === app.viewerId && state.suggestion ? myHand.filter((id) => suggestionCardIds(state.suggestion).includes(id)) : [];
   const canAct = isMyTurn && state.suggestion?.status !== "waiting";
   const canFinish = canAct && state.movesLeft > 0;
   const canEnd = canAct && state.movesLeft === 0 && state.lastRoll !== null;
@@ -1073,7 +1090,7 @@ function cleanGameView(state) {
   const reachable = isMyTurn && state.movesLeft > 0 ? reachableTileDistances(currentTile, state.movesLeft) : new Map();
   const responderId = state.suggestion?.status === "waiting" ? state.suggestion.responderIds[state.suggestion.responderIndex] : null;
   const responder = state.players.find((player) => player.id === responderId);
-  const responseCards = responderId === app.viewerId && state.suggestion ? myHand.filter((id) => [state.suggestion.suspectId, state.suggestion.weaponId, state.suggestion.roomId].includes(id)) : [];
+  const responseCards = responderId === app.viewerId && state.suggestion ? myHand.filter((id) => suggestionCardIds(state.suggestion).includes(id)) : [];
   const canAct = isMyTurn && state.suggestion?.status !== "waiting";
   const sameRoomBlocked = canAct && settings.noRepeatRoomSuggestions !== false && state.lastSuggestionRoomByPlayer?.[app.viewerId] === currentRoom;
   const canSuggest = canAct && inRoom && !sameRoomBlocked;

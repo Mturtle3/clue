@@ -279,7 +279,7 @@ export function endTurn(state: GameState, playerId: string): GameState {
 }
 
 function matchingCards(hand: string[], suggestion: Pick<Suggestion, "suspectId" | "weaponId" | "roomId">): string[] {
-  return hand.filter((cardId) => [suggestion.suspectId, suggestion.weaponId, suggestion.roomId].includes(cardId));
+  return hand.filter((cardId) => [suggestion.suspectId, suggestion.weaponId, `room-${suggestion.roomId}`].includes(cardId));
 }
 
 function addSuggestionHistory(
