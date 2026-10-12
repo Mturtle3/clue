@@ -1,0 +1,4 @@
+project_id = "clue-nexus"
+
+[functions.game-action]
+verify_jwt = true
