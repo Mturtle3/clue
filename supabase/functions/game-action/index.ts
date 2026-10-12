@@ -4,6 +4,7 @@ import {
   addPlayer,
   createGame,
   endTurn,
+  finishMovement,
   makeAccusation,
   makeSuggestion,
   movePlayer,
@@ -31,7 +32,8 @@ type Action =
   | { type: "settings"; roomCode: string; settings: Partial<RuleSettings> }
   | { type: "start"; roomCode: string }
   | { type: "roll"; roomCode: string }
-  | { type: "move"; roomCode: string; destination: RoomId }
+  | { type: "move"; roomCode: string; destination: number }
+  | { type: "finish_movement"; roomCode: string }
   | { type: "suggest"; roomCode: string; suspectId: string; weaponId: string }
   | { type: "respond"; roomCode: string; cardId: string | null }
   | { type: "accuse"; roomCode: string; suspectId: string; weaponId: string; roomId: RoomId }
@@ -202,6 +204,9 @@ async function dispatch(userId: string, action: Action) {
       break;
     case "move":
       next = movePlayer(next, userId, action.destination);
+      break;
+    case "finish_movement":
+      next = finishMovement(next, userId);
       break;
     case "suggest":
       next = makeSuggestion(next, userId, action.suspectId, action.weaponId);

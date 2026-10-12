@@ -79,6 +79,21 @@ const ROOM_GRAPH = {
   library: ["study", "billiard", "conservatory"], billiard: ["hall", "library", "dining", "ballroom"], dining: ["lounge", "billiard", "kitchen"],
   conservatory: ["library", "ballroom"], ballroom: ["billiard", "conservatory", "kitchen"], kitchen: ["dining", "ballroom"],
 };
+const BOARD_TILES = [
+  [1, 1, "study", true], [2, 1, "study", false], [3, 1, "study", false],
+  [4, 1, "hall", false], [5, 1, "hall", true], [6, 1, "hall", false],
+  [7, 1, "lounge", false], [8, 1, "lounge", false], [9, 1, "lounge", true],
+  [9, 2, "dining", false], [9, 3, "dining", false], [9, 4, "dining", false],
+  [9, 5, "dining", true], [9, 6, "kitchen", false], [9, 7, "kitchen", false],
+  [9, 8, "kitchen", false], [9, 9, "kitchen", true],
+  [8, 9, "ballroom", false], [7, 9, "ballroom", false], [6, 9, "ballroom", false],
+  [5, 9, "ballroom", true], [4, 9, "conservatory", false], [3, 9, "conservatory", false],
+  [2, 9, "conservatory", false], [1, 9, "conservatory", true], [1, 8, "library", false],
+  [1, 7, "library", false], [1, 6, "library", true], [1, 5, "billiard", false],
+  [1, 4, "billiard", false], [1, 3, "billiard", true],
+].map(([x, y, roomId, isRoom], id) => ({ id, x, y, roomId, isRoom }));
+const ROOM_TILE_INDEX = Object.fromEntries(BOARD_TILES.filter((tile) => tile.isRoom).map((tile) => [tile.roomId, tile.id]));
+const BOARD_GRAPH = Object.fromEntries(BOARD_TILES.map((tile) => [tile.id, [(tile.id - 1 + BOARD_TILES.length) % BOARD_TILES.length, (tile.id + 1) % BOARD_TILES.length]]));
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 const uid = (prefix = "id") => `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36).slice(-4)}`;
@@ -107,7 +122,10 @@ function cardsForPlayers(count, includeExpansion = true) {
 
 function makePlayers(entries, hostId) {
   const actualHost = hostId || entries[0]?.id;
-  return entries.map((entry, index) => ({ id: entry.id || uid("player"), name: (entry.name || `Guest ${index + 1}`).trim().slice(0, 22), color: entry.color || PLAYER_COLORS[index % PLAYER_COLORS.length], isHost: (entry.id || actualHost) === actualHost, isConnected: true, ready: false, eliminated: false, position: { roomId: ROOM_IDS[index % ROOM_IDS.length], step: 0 }, cardCount: 0 }));
+  return entries.map((entry, index) => {
+    const roomId = ROOM_IDS[index % ROOM_IDS.length];
+    return { id: entry.id || uid("player"), name: (entry.name || `Guest ${index + 1}`).trim().slice(0, 22), color: entry.color || PLAYER_COLORS[index % PLAYER_COLORS.length], isHost: (entry.id || actualHost) === actualHost, isConnected: true, ready: false, eliminated: false, position: { roomId, step: 0, tileIndex: ROOM_TILE_INDEX[roomId] }, cardCount: 0 };
+  });
 }
 
 function deal(players, cards) {
@@ -128,12 +146,16 @@ function activePlayers(state) { return state.players.filter((player) => !player.
 function currentPlayer(state) { return state.players[state.currentPlayerIndex]; }
 function nextActiveIndex(state, fromIndex) { for (let offset = 1; offset <= state.players.length; offset += 1) { const index = (fromIndex + offset) % state.players.length; if (!state.players[index].eliminated) return index; } return fromIndex; }
 function refreshHands(state) { const pool = cardsForPlayers(state.players.length, state.settings.expansionCards); const dealt = deal(state.players, pool.cards); state.solution = dealt.solution; state.hands = dealt.hands; state.deckInfo = { handSize: pool.handSize, expansionCards: pool.expansionCards.map((item) => item.id), totalCards: pool.cards.length }; state.players.forEach((player) => { player.cardCount = state.hands[player.id]?.length || 0; }); return state; }
-function startGame(state) { refreshHands(state); state.phase = "playing"; state.players.forEach((player) => { player.ready = true; }); state.currentPlayerIndex = 0; state.movesLeft = 0; state.lastRoll = null; state.suggestion = null; state.events.unshift(eventLog("The doors are locked. The investigation begins.", "gold")); return state; }
-function addPlayer(state, entry) { if (state.phase !== "lobby" || state.players.length >= 7) return state; const player = makePlayers([entry], state.hostId)[0]; player.isHost = false; player.position.roomId = ROOM_IDS[state.players.length % ROOM_IDS.length]; state.players.push(player); state.events.unshift(eventLog(`${player.name} joined the investigation.`, "mint")); return state; }
+function startGame(state) { refreshHands(state); state.phase = "playing"; state.players.forEach((player, index) => { player.ready = true; const tileIndex = Number.isInteger(player.position?.tileIndex) ? player.position.tileIndex : ROOM_TILE_INDEX[player.position?.roomId] ?? index; player.position = { ...player.position, tileIndex, roomId: BOARD_TILES[tileIndex]?.roomId || player.position.roomId, step: 0 }; }); state.currentPlayerIndex = 0; state.movesLeft = 0; state.lastRoll = null; state.suggestion = null; state.events.unshift(eventLog("The doors are locked. The investigation begins.", "gold")); return state; }
+function addPlayer(state, entry) { if (state.phase !== "lobby" || state.players.length >= 7) return state; const usedColors = new Set(state.players.map((player) => player.color)); const color = entry.color || PLAYER_COLORS.find((candidate) => !usedColors.has(candidate)) || PLAYER_COLORS[state.players.length % PLAYER_COLORS.length]; const player = makePlayers([{ ...entry, color }], state.hostId)[0]; const roomId = ROOM_IDS[state.players.length % ROOM_IDS.length]; player.isHost = false; player.position = { roomId, step: 0, tileIndex: ROOM_TILE_INDEX[roomId] }; state.players.push(player); state.events.unshift(eventLog(`${player.name} joined the investigation.`, "mint")); return state; }
 function toggleReady(state, playerId) { const player = state.players.find((item) => item.id === playerId); if (player) player.ready = !player.ready; return state; }
 function updateSettings(state, settings) { if (state.phase === "lobby") state.settings = { ...state.settings, ...settings }; return state; }
-function roll(state, playerId) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.movesLeft > 0 || state.suggestion?.status === "waiting") return state; state.lastRoll = Math.floor(Math.random() * 6) + 1; state.movesLeft = state.lastRoll; state.events.unshift(eventLog(`${player.name} rolled ${state.lastRoll}.`, "blue")); return state; }
-function move(state, playerId, destination) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.movesLeft <= 0 || !ROOM_GRAPH[player.position.roomId].includes(destination)) return state; player.position = { roomId: destination, step: 0 }; state.movesLeft -= 1; state.events.unshift(eventLog(`${player.name} entered the ${roomName(destination)}.`, "mint")); return state; }
+function roll(state, playerId) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.movesLeft > 0 || state.lastRoll !== null || state.suggestion?.status === "waiting") return state; state.lastRoll = Math.floor(Math.random() * 6) + 1; state.movesLeft = state.lastRoll; state.events.unshift(eventLog(`${player.name} rolled ${state.lastRoll}.`, "blue")); return state; }
+function tileDistance(from, to) { if (from === to) return 0; const forward = (to - from + BOARD_TILES.length) % BOARD_TILES.length; const backward = (from - to + BOARD_TILES.length) % BOARD_TILES.length; return Math.min(forward, backward); }
+function reachableTileDistances(from, maxDistance) { const distances = new Map([[from, 0]]); const queue = [from]; while (queue.length) { const current = queue.shift(); const distance = distances.get(current); if (distance >= maxDistance) continue; (BOARD_GRAPH[current] || []).forEach((next) => { if (!distances.has(next)) { distances.set(next, distance + 1); queue.push(next); } }); } return distances; }
+function playerTileIndex(player, fallbackIndex = 0) { const tileIndex = Number.isInteger(player?.position?.tileIndex) ? player.position.tileIndex : ROOM_TILE_INDEX[player?.position?.roomId] ?? fallbackIndex; return BOARD_TILES[tileIndex] ? tileIndex : 0; }
+function move(state, playerId, destination) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.movesLeft <= 0) return state; const destinationTile = BOARD_TILES[Number(destination)]; if (!destinationTile) return state; const fromTile = playerTileIndex(player, state.players.indexOf(player)); const distance = tileDistance(fromTile, destinationTile.id); if (distance < 1 || distance > state.movesLeft) return state; player.position = { roomId: destinationTile.roomId, step: 0, tileIndex: destinationTile.id }; state.movesLeft -= distance; state.events.unshift(eventLog(`${player.name} moved ${distance} space${distance === 1 ? "" : "s"}${destinationTile.isRoom ? ` to the ${roomName(destinationTile.roomId)}` : ""}.`, "mint")); return state; }
+function finishMovement(state, playerId) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.movesLeft <= 0 || state.suggestion?.status === "waiting") return state; state.movesLeft = 0; state.events.unshift(eventLog(`${player.name} finished moving.`, "slate")); return state; }
 function endTurn(state, playerId) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.movesLeft > 0 || state.suggestion?.status === "waiting") return state; state.currentPlayerIndex = nextActiveIndex(state, state.currentPlayerIndex); state.lastRoll = null; state.movesLeft = 0; state.suggestion = null; state.events.unshift(eventLog(`${currentPlayer(state).name}'s turn.`, "gold")); return state; }
 function matchingCards(hand, suggestion) { return (hand || []).filter((id) => [suggestion.suspectId, suggestion.weaponId, suggestion.roomId].includes(id)); }
 function makeSuggestion(state, playerId, suspectId, weaponId) { const player = currentPlayer(state); if (state.phase !== "playing" || player?.id !== playerId || state.suggestion?.status === "waiting") return state; const responderIds = state.players.filter((item) => item.id !== playerId && !item.eliminated).sort((a, b) => (state.players.indexOf(a) - state.players.indexOf(player) + state.players.length) % state.players.length - (state.players.indexOf(b) - state.players.indexOf(player) + state.players.length) % state.players.length).map((item) => item.id); state.suggestion = { byPlayerId: playerId, suspectId, weaponId, roomId: player.position.roomId, responderIds, responderIndex: 0, status: responderIds.length ? "waiting" : "no-match" }; state.events.unshift(eventLog(`${player.name} made a suggestion in the ${roomName(player.position.roomId)}.`, "rose")); return state; }
@@ -423,6 +445,12 @@ root.addEventListener("click", (event) => {
   const note = target.closest("[data-note-card]");
   if (note) { changeNote(note.dataset.noteCard); return; }
 
+  const tileButton = target.closest("[data-move-tile]");
+  if (tileButton && !tileButton.disabled) {
+    act("move", { destination: Number(tileButton.dataset.moveTile) }, (state) => move(state, app.viewerId, Number(tileButton.dataset.moveTile)));
+    return;
+  }
+
   const moveButton = target.closest("[data-move-room]");
   if (moveButton && !moveButton.disabled) {
     act("move", { destination: moveButton.dataset.moveRoom }, (state) => move(state, app.viewerId, moveButton.dataset.moveRoom));
@@ -439,7 +467,7 @@ root.addEventListener("click", (event) => {
   const modalButton = target.closest("[data-modal]");
   if (modalButton) { app.modal = modalButton.dataset.modal; render(); return; }
 
-  if (target.classList.contains("modal-backdrop") || target.closest("[data-action='close-modal']")) { app.modal = null; render(); return; }
+  if (target.classList.contains("modal-backdrop") || target.closest(".modal-close")) { app.modal = null; render(); return; }
 
   const action = target.closest("[data-action]");
   if (!action) return;
@@ -450,6 +478,7 @@ root.addEventListener("click", (event) => {
     case "ready": act("ready", {}, (state) => toggleReady(state, app.viewerId)); break;
     case "start": act("start", {}, (state) => startGame(state)); break;
     case "roll": act("roll", {}, (state) => roll(state, app.viewerId)); break;
+    case "finish-movement": act("finish_movement", {}, (state) => finishMovement(state, app.viewerId)); break;
     case "end-turn": act("end_turn", {}, (state) => endTurn(state, app.viewerId)); break;
     case "setting": {
       const key = action.dataset.key;
@@ -513,11 +542,62 @@ root.addEventListener("submit", async (event) => {
   }
 });
 
-// Clean setup screen: player names are optional; the server assigns Guest 1, Guest 2, etc.
-// This override keeps room creation simple for groups that do not want a name field.
+// Keep the name field in both live setup flows.
 setupView = function (kind) {
   const create = kind === "create";
-  return `<main class="setup-shell"><div class="setup-panel"><button class="back-link" data-screen="home">← Back to the foyer</button><div class="setup-heading"><div class="brand-lockup"><span class="brand-mark">✦</span><span>CLUE <em>NEXUS</em></span></div><p class="eyebrow">${create ? "Open a new case" : "Step into an open case"}</p><h1>${create ? "Set the table." : "What’s the room code?"}</h1><p>${create ? "Choose a name for the mansion. Your friends will join with a six-character code." : "Enter the code your host shared. No account, email, or password needed."}</p></div><form class="setup-form" id="${create ? "create-form" : "join-form"}">${create ? `<label><span>Mansion name <small>optional</small></span><input name="roomName" value="The Moonlit Estate" maxlength="36"></label>` : `<label><span>Room code</span><input class="code-input" name="roomCode" placeholder="A7K2QF" maxlength="6" required></label>`}${app.error ? `<div class="error-banner">${esc(app.error)}</div>` : ""}<button class="button button-primary button-full" type="submit" ${app.loading ? "disabled" : ""}>${app.loading ? "Unlocking the door…" : create ? "Create the room →" : "Enter the room →"}</button></form><div class="setup-note"><span>✦</span>${LIVE_CONFIGURED ? "Live multiplayer is configured. Player names will be assigned automatically." : "You are in demo mode until Supabase is connected."}</div></div><aside class="setup-aside"><div class="aside-quote">“The truth is hidden in plain sight.”</div><div class="aside-moon"></div><div class="aside-lines"><span></span><span></span><span></span></div><div class="aside-detail"><b>02—07</b><span>players per case</span></div></aside></main>`;
+  return `<main class="setup-shell"><div class="setup-panel"><button class="back-link" data-screen="home">← Back to the foyer</button><div class="setup-heading"><div class="brand-lockup"><span class="brand-mark">✦</span><span>CLUE <em>NEXUS</em></span></div><p class="eyebrow">${create ? "Open a new case" : "Step into an open case"}</p><h1>${create ? "Set the table." : "What’s the room code?"}</h1><p>${create ? "Pick your detective name and a mansion for the case." : "Enter the code your host shared."}</p></div><form class="setup-form" id="${create ? "create-form" : "join-form"}"><label><span>Your detective name</span><input name="displayName" autofocus placeholder="e.g. Detective Mark" maxlength="22" required></label>${create ? `<label><span>Mansion name <small>optional</small></span><input name="roomName" value="The Moonlit Estate" maxlength="36"></label>` : `<label><span>Room code</span><input class="code-input" name="roomCode" placeholder="A7K2QF" maxlength="6" required></label>`}${app.error ? `<div class="error-banner">${esc(app.error)}</div>` : ""}<button class="button button-primary button-full" type="submit" ${app.loading ? "disabled" : ""}>${app.loading ? "Opening…" : create ? "Create the room →" : "Join the room →"}</button></form><div class="setup-note"><span>✦</span>${LIVE_CONFIGURED ? "Live multiplayer is ready." : "Demo mode is active until Supabase is connected."}</div></div><aside class="setup-aside"><div class="aside-quote">“The truth is hidden in plain sight.”</div><div class="aside-moon"></div><div class="aside-lines"><span></span><span></span><span></span></div><div class="aside-detail"><b>02—07</b><span>players per case</span></div></aside></main>`;
+};
+
+function tileConnectionsMarkup() {
+  return BOARD_TILES.map((tile, index) => {
+    const next = BOARD_TILES[(index + 1) % BOARD_TILES.length];
+    const dx = (next.x - tile.x) * 10;
+    const dy = (next.y - tile.y) * 10;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    return `<span class="tile-connection" style="left:${tile.x * 10}%;top:${tile.y * 10}%;width:${length}%;transform:rotate(${angle}deg)"></span>`;
+  }).join("");
+}
+
+function boardTileMarkup(state, tile, reachable, isMyTurn) {
+  const occupants = state.players.filter((player) => playerTileIndex(player) === tile.id);
+  const distance = reachable.get(tile.id);
+  const canMove = isMyTurn && Number.isInteger(distance) && distance > 0 && distance <= state.movesLeft;
+  const meta = ROOM_META[tile.roomId];
+  return `<button class="board-tile ${tile.isRoom ? "room-tile" : "path-tile"} ${tile.isRoom ? `tile-${meta[5]}` : ""} ${canMove ? "reachable" : ""} ${occupants.some((player) => player.id === app.viewerId) ? "current" : ""}" style="left:${tile.x * 10}%;top:${tile.y * 10}%" data-move-tile="${tile.id}" ${canMove ? "" : "disabled"} aria-label="${tile.isRoom ? esc(meta[0]) : `Board space ${tile.id + 1}`}${canMove ? `, move ${distance} spaces` : ""}"><span class="tile-mark">${tile.isRoom ? meta[2] : tile.id + 1}</span>${tile.isRoom ? `<strong>${esc(meta[0])}</strong>` : ""}<span class="tile-occupants">${occupants.map((player) => `<i class="board-pawn pawn-${player.color} ${player.id === app.viewerId ? "you" : ""}" title="${esc(player.name)}">${esc(player.name.slice(0, 1))}</i>`).join("")}</span></button>`;
+}
+
+function compactHandCard(id, note) {
+  const item = card(id);
+  if (!item) return "";
+  return `<button class="compact-hand-card tone-${item.tone}" data-note-card="${item.id}" title="Click to mark this card"><span>${item.glyph}</span><strong>${esc(item.name)}</strong><small>${note === "found" ? "in your hand" : item.category}</small></button>`;
+}
+
+function cleanPlayerRows(state) {
+  return state.players.map((player) => `<div class="clean-player-row player-${player.color}"><span class="clean-player-dot"></span><span class="clean-player-name">${esc(player.name)}${player.id === app.viewerId ? " <em>you</em>" : ""}</span>${player.id === state.players[state.currentPlayerIndex]?.id ? `<span class="clean-turn-label">TURN</span>` : ""}${player.isHost ? `<span class="clean-host-label">HOST</span>` : ""}</div>`).join("");
+}
+
+function cleanEventRows(state) {
+  return state.events.slice(0, 5).map((item) => `<div class="clean-event-row"><i class="event-${item.tone}"></i><span>${esc(item.text)}</span></div>`).join("");
+}
+
+gameView = function (state) {
+  const me = state.players.find((player) => player.id === app.viewerId);
+  const active = state.players[state.currentPlayerIndex];
+  const isMyTurn = active?.id === app.viewerId && !me?.eliminated;
+  const myHand = app.live ? state.myHand || [] : state.hands[app.viewerId] || [];
+  const myNotes = app.live ? getLiveNotes(state) : state.notes[app.viewerId] || {};
+  const currentTile = playerTileIndex(me || {}, state.players.indexOf(me));
+  const reachable = isMyTurn && state.movesLeft > 0 ? reachableTileDistances(currentTile, state.movesLeft) : new Map();
+  const responderId = state.suggestion?.status === "waiting" ? state.suggestion.responderIds[state.suggestion.responderIndex] : null;
+  const responder = state.players.find((player) => player.id === responderId);
+  const responseCards = responderId === app.viewerId && state.suggestion ? myHand.filter((id) => [state.suggestion.suspectId, state.suggestion.weaponId, state.suggestion.roomId].includes(id)) : [];
+  const canAct = isMyTurn && state.suggestion?.status !== "waiting";
+  const canFinish = canAct && state.movesLeft > 0;
+  const canEnd = canAct && state.movesLeft === 0 && state.lastRoll !== null;
+  const currentRoom = me?.position?.roomId || "study";
+  const phaseTitle = state.phase === "won" ? "Case closed." : state.phase === "ended" ? "The trail went cold." : "Find the missing truth.";
+  return `<div class="game-shell clean-game"><header class="game-header clean-header"><div class="brand-lockup compact"><span class="brand-mark">✦</span><span>CLUE <em>NEXUS</em></span></div><div class="header-room"><span>ROOM</span><button data-action="copy-room">${esc(state.roomCode)}<small>copy</small></button></div><div class="header-right">${!app.live ? `<label class="demo-switcher"><span>Playing as</span><select data-action="switch-player">${state.players.map((player) => `<option value="${player.id}" ${player.id === app.viewerId ? "selected" : ""}>${esc(player.name)}</option>`).join("")}</select></label>` : ""}<span class="connection-badge"><i class="status-dot ${app.live ? "live" : "demo"}"></i>${app.live ? "LIVE" : "DEMO"}</span><button class="icon-button" data-action="leave" aria-label="Leave room">↗</button></div></header><main class="clean-game-layout"><section class="clean-board-column"><div class="clean-title-row"><div><p class="eyebrow">${esc(state.roomName)}</p><h1>${phaseTitle}</h1></div><div class="clean-turn-summary"><span>${active ? `${esc(active.name)}'s turn` : "Waiting"}</span><strong>${isMyTurn ? (state.movesLeft ? `${state.movesLeft} spaces left` : "Roll to move") : state.phase.toUpperCase()}</strong></div></div><div class="tile-board-card"><div class="tile-board-top"><span>THE ESTATE BOARD</span><span>${me ? `${esc(roomName(currentRoom))} · space ${currentTile + 1}` : "Waiting for detectives"}</span></div><div class="tile-board"><div class="tile-board-grid"></div>${tileConnectionsMarkup()}${BOARD_TILES.map((tile) => boardTileMarkup(state, tile, reachable, isMyTurn)).join("")}<div class="board-center-card"><span>CASE BOARD</span><strong>${esc(roomName(currentRoom))}</strong><small>${isMyTurn ? state.movesLeft > 0 ? "Choose a highlighted tile" : "Roll the die to begin" : `Watching ${esc(active?.name || "the table")}`}</small></div></div><div class="tile-board-bottom"><span>Roll first, then choose a highlighted tile.</span><span>${state.lastRoll ? `Last roll: ${state.lastRoll}` : "No roll yet"}</span></div></div><div class="clean-action-bar"><button class="button dice-button clean-action-roll" data-action="roll" ${canAct && state.movesLeft === 0 && state.lastRoll === null ? "" : "disabled"}><span>⚄</span>Roll</button><button class="button button-ghost" data-action="finish-movement" ${canFinish ? "" : "disabled"}>Finish movement</button><button class="button button-ghost" data-action="end-turn" ${canEnd ? "" : "disabled"}>End turn</button><span class="clean-action-divider"></span><button class="button button-ghost" data-modal="suggest" ${canAct ? "" : "disabled"}>Make a guess</button><button class="button button-danger" data-modal="accuse" ${canAct ? "" : "disabled"}>Accuse</button></div>${state.suggestion?.status === "waiting" ? suggestionBar(state, responder, responseCards) : ""}</section><aside class="clean-sidebar"><section class="clean-side-card clean-turn-card"><div class="clean-card-heading"><span class="section-kicker">CURRENT TURN</span><span class="clean-roll-badge">${state.movesLeft ? `${state.movesLeft} left` : state.lastRoll ? `rolled ${state.lastRoll}` : "ready"}</span></div><div class="clean-current-player"><span class="turn-avatar player-${active?.color || "gold"}">${esc(active?.name?.slice(0, 1) || "?")}</span><div><strong>${esc(active?.name || "Waiting")}</strong><small>${isMyTurn ? "This is your turn" : "Watch the board"}</small></div></div></section><section class="clean-side-card"><div class="clean-card-heading"><span class="section-kicker">DETECTIVES</span><span class="clean-count">${state.players.length}/7</span></div><div class="clean-player-list">${cleanPlayerRows(state)}</div></section><section class="clean-side-card clean-hand-panel"><div class="clean-card-heading"><span class="section-kicker">YOUR CARDS</span><span class="clean-count">${myHand.length}</span></div><div class="compact-hand">${myHand.length ? myHand.map((id) => compactHandCard(id, myNotes[id])).join("") : `<span class="clean-empty">Cards arrive when the case starts.</span>`}</div></section><section class="clean-side-card clean-activity"><div class="clean-card-heading"><span class="section-kicker">CASE LOG</span></div><div class="clean-event-list">${cleanEventRows(state)}</div>${state.settings.allowChat ? `<form class="chat-form clean-chat-form" id="chat-form"><input name="text" placeholder="Say something suspicious…" maxlength="240"><button aria-label="Send message">↑</button></form>` : ""}</section></aside></main>${app.modal === "suggest" ? selectionModal("suggest") : app.modal === "accuse" ? selectionModal("accuse") : ""}${globalOverlay()}</div>`;
 };
 
 async function restoreLiveRoom() {

@@ -6,7 +6,8 @@ The repository includes a local demo mode, so the interface can be tested before
 
 ## What is included
 
-- Full mansion floorplan with room-to-room movement and dice rolls.
+- A tile-based mansion board where dice rolls control movement.
+- Detective names and distinct player colors at every table.
 - Suggestions, private card reveals, final accusations, event feed, private notes, and room chat.
 - Room codes and anonymous guest sessions—friends do not create accounts.
 - Classic cards plus balanced Nexus expansion cards.
@@ -93,6 +94,6 @@ This project does not include a billing integration. Keep the Supabase organizat
 
 - **The app says demo mode:** `config.js` still has blank values, or the browser needs a refresh.
 - **Guest session error:** enable Anonymous Sign-Ins in Supabase Authentication.
-- **Room action error:** confirm the SQL migration ran and `game-action` was deployed.
+- **Room action error:** confirm the SQL migration ran and `game-action` was deployed after the latest code was uploaded.
 - **Friends cannot connect:** confirm the GitHub Pages site is using the same Supabase URL/key and that the room was created after the function was deployed.
 - **A project is paused:** resume it from the Supabase dashboard. Do not delete it unless you have exported anything you want to keep.

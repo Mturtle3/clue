@@ -1,5 +1,5 @@
 import { BASE_CARDS, cardsForPlayerCount, getCard } from "./cards.ts";
-import { ROOM_GRAPH, ROOM_IDS, roomName } from "./board.ts";
+import { BOARD_TILES, ROOM_IDS, ROOM_TILE_INDEX, normalizeTileIndex, roomName, tileDistance } from "./board.ts";
 import type {
   CardCategory,
   ChatMessage,
@@ -79,7 +79,7 @@ export function buildPlayers(
     isConnected: true,
     ready: false,
     eliminated: false,
-    position: { roomId: ROOM_IDS[index % ROOM_IDS.length], step: 0 },
+    position: { roomId: ROOM_IDS[index % ROOM_IDS.length], step: 0, tileIndex: ROOM_TILE_INDEX[ROOM_IDS[index % ROOM_IDS.length]] },
     cardCount: 0,
   } satisfies Player));
   const actualHost = hostId ?? players[0]?.id;
@@ -123,7 +123,15 @@ export function createGame(
 export function startGame(state: GameState): GameState {
   if (state.players.length < 2) return state;
   const dealtState = refreshHands({ ...state, phase: "lobby" });
-  const refreshed = dealtState.players.map((player) => ({ ...player, ready: true, cardCount: dealtState.hands[player.id]?.length ?? 0 }));
+  const refreshed = dealtState.players.map((player, index) => {
+    const tileIndex = normalizeTileIndex(player.position.tileIndex, player.position.roomId, index);
+    return {
+      ...player,
+      ready: true,
+      cardCount: dealtState.hands[player.id]?.length ?? 0,
+      position: { ...player.position, roomId: BOARD_TILES[tileIndex].roomId, tileIndex, step: 0 },
+    };
+  });
   return {
     ...dealtState,
     phase: "playing",
@@ -150,10 +158,13 @@ export function updateSettings(state: GameState, settings: Partial<RuleSettings>
 
 export function addPlayer(state: GameState, entry: { id?: string; name: string; color?: PlayerColor }): GameState {
   if (state.phase !== "lobby" || state.players.length >= 7) return state;
-  const newPlayer = buildPlayers([entry], state.hostId)[0];
+  const usedColors = new Set(state.players.map((player) => player.color));
+  const nextColor = entry.color ?? PLAYER_COLORS.find((color) => !usedColors.has(color)) ?? PLAYER_COLORS[state.players.length % PLAYER_COLORS.length];
+  const newPlayer = buildPlayers([{ ...entry, color: nextColor }], state.hostId)[0];
+  const startingRoom = ROOM_IDS[state.players.length % ROOM_IDS.length];
   return {
     ...state,
-    players: [...state.players, { ...newPlayer, isHost: false, position: { roomId: ROOM_IDS[state.players.length % ROOM_IDS.length], step: 0 } }],
+    players: [...state.players, { ...newPlayer, isHost: false, position: { roomId: startingRoom, step: 0, tileIndex: ROOM_TILE_INDEX[startingRoom] } }],
     events: [event(`${newPlayer.name} joined the investigation.`, "mint"), ...state.events].slice(0, 30),
   };
 }
@@ -172,7 +183,7 @@ export function removePlayer(state: GameState, playerId: string): GameState {
 
 export function rollForTurn(state: GameState, playerId: string): GameState {
   const player = currentPlayer(state);
-  if (state.phase !== "playing" || !player || player.id !== playerId || state.movesLeft > 0 || state.suggestion?.status === "waiting") return state;
+  if (state.phase !== "playing" || !player || player.id !== playerId || state.movesLeft > 0 || state.lastRoll !== null || state.suggestion?.status === "waiting") return state;
   const roll = Math.floor(Math.random() * 6) + 1;
   return {
     ...state,
@@ -182,17 +193,30 @@ export function rollForTurn(state: GameState, playerId: string): GameState {
   };
 }
 
-export function movePlayer(state: GameState, playerId: string, destination: RoomId): GameState {
+export function movePlayer(state: GameState, playerId: string, destination: number): GameState {
   const player = currentPlayer(state);
   if (state.phase !== "playing" || !player || player.id !== playerId || state.movesLeft <= 0) return state;
-  if (!ROOM_GRAPH[player.position.roomId].includes(destination)) return state;
-  const nextMoves = state.movesLeft - 1;
-  const movedPlayer = { ...player, position: { roomId: destination, step: 0 } };
+  if (!Number.isInteger(destination) || !BOARD_TILES[destination]) return state;
+  const fromTile = normalizeTileIndex(player.position.tileIndex, player.position.roomId, state.players.indexOf(player));
+  const distance = tileDistance(fromTile, destination);
+  if (distance < 1 || distance > state.movesLeft) return state;
+  const destinationTile = BOARD_TILES[destination];
+  const movedPlayer = { ...player, position: { roomId: destinationTile.roomId, step: 0, tileIndex: destination } };
   return {
     ...state,
-    movesLeft: nextMoves,
+    movesLeft: state.movesLeft - distance,
     players: state.players.map((candidate) => (candidate.id === playerId ? movedPlayer : candidate)),
-    events: [event(`${player.name} entered the ${roomName(destination)}.`, "mint"), ...state.events].slice(0, 30),
+    events: [event(`${player.name} moved ${distance} space${distance === 1 ? "" : "s"}${destinationTile.isRoom ? ` to the ${roomName(destinationTile.roomId)}` : ""}.`, "mint"), ...state.events].slice(0, 30),
+  };
+}
+
+export function finishMovement(state: GameState, playerId: string): GameState {
+  const player = currentPlayer(state);
+  if (state.phase !== "playing" || !player || player.id !== playerId || state.movesLeft <= 0 || state.suggestion?.status === "waiting") return state;
+  return {
+    ...state,
+    movesLeft: 0,
+    events: [event(`${player.name} finished moving.`, "slate"), ...state.events].slice(0, 30),
   };
 }
 

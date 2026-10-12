@@ -24,6 +24,7 @@ export type RoomId =
 export type Position = {
   roomId: RoomId;
   step: number;
+  tileIndex: number;
 };
 
 export type PlayerColor = "coral" | "gold" | "mint" | "violet" | "sky" | "rose" | "lime";
