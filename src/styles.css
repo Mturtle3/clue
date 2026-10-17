@@ -163,6 +163,68 @@
   .board-pawn { width: 18px; height: 18px; border-width: 2px; font-size: 8px; }
 }
 
+/* Final table rules: there are no hidden shortcuts or in-app notebook marks. */
+.secret-board-note, .secret-passage, .tile-connection.secret { display: none !important; }
+
+.cards-at-play { margin-top: 18px; padding: 16px; color: var(--board-ink); background: var(--board-paper-light); border: 3px solid var(--board-wood); border-radius: 4px; box-shadow: 4px 5px 0 rgba(51,29,24,.2); }
+.cards-at-play-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 2px solid rgba(145,66,56,.32); }
+.cards-at-play-heading > div { display: grid; gap: 4px; }
+.cards-at-play-heading strong { font: 20px Georgia, serif; }
+.cards-at-play-intro { max-width: 760px; margin: 11px 0 15px; color: var(--board-muted); font: 12px/1.45 Georgia, serif; }
+.cards-at-play-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
+.cards-at-play-group h3 { padding-bottom: 6px; color: var(--board-red); border-bottom: 2px solid rgba(145,66,56,.28); font: 17px Georgia, serif; }
+.cards-at-play-list { display: grid; gap: 5px; padding-top: 7px; }
+.cards-at-play-card { display: grid; grid-template-columns: 25px minmax(0, 1fr); align-items: center; gap: 7px; min-height: 42px; padding: 6px 7px; color: var(--board-ink); background: rgba(255,250,234,.68); border: 1px solid rgba(85,50,38,.22); border-radius: 2px; }
+.cards-at-play-glyph { display: grid; place-items: center; width: 24px; height: 24px; color: var(--board-red); font: 17px Georgia, serif; }
+.cards-at-play-card > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.cards-at-play-card strong { overflow: hidden; font: 12px Georgia, serif; text-overflow: ellipsis; white-space: nowrap; }
+.cards-at-play-card small { color: var(--board-muted); font-size: 8px; }
+.cards-at-play-empty { color: var(--board-muted); font: 11px Georgia, serif; font-style: italic; }
+
+.suggestion-status { margin-top: 14px; padding: 13px 15px; color: var(--board-ink); background: #fff5d9; border: 2px solid var(--board-wood); border-radius: 3px; box-shadow: 3px 4px 0 rgba(51,29,24,.13); }
+.suggestion-status.resolved { border-color: #5d8b57; background: #edf4df; }
+.suggestion-status.no-match { border-color: #a8564d; background: #f6e3d5; }
+.suggestion-status-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.suggestion-status-heading > div { display: grid; gap: 4px; min-width: 0; }
+.suggestion-status-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 16px Georgia, serif; }
+.suggestion-status-heading > span { color: var(--board-muted); font: 11px Georgia, serif; text-align: right; }
+.suggestion-response-log { display: grid; gap: 4px; margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(85,50,38,.18); }
+.suggestion-response { color: var(--board-muted); font: 12px Georgia, serif; }
+.suggestion-response.shown { color: #315d38; font-weight: 700; }
+.suggestion-response.not-shown { color: #7d332b; }
+.suggestion-response.waiting { font-style: italic; }
+
+.clean-player-name { display: grid; gap: 2px; min-width: 0; }
+.clean-player-name strong { overflow: hidden; color: inherit; font: 600 12px Georgia, serif; text-overflow: ellipsis; white-space: nowrap; }
+.clean-player-name small { color: var(--board-muted); font: 9px Georgia, serif; }
+.compact-hand-card { cursor: default; }
+.compact-hand-card:hover { background: var(--board-paper-light); border-color: rgba(85,50,38,.34); }
+
+.reveal-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px; background: rgba(35,22,19,.88); backdrop-filter: blur(3px) sepia(.18); }
+.reveal-dialog { width: min(560px, 100%); padding: clamp(26px, 5vw, 48px); color: var(--board-ink); text-align: center; background: var(--board-paper-light); border: 5px solid var(--board-wood); border-radius: 5px; box-shadow: 8px 10px 0 rgba(12,9,8,.32), inset 0 0 0 3px rgba(244,215,145,.46); }
+.reveal-kicker { color: var(--board-red); font: 700 11px 'DM Mono', monospace; letter-spacing: .14em; }
+.reveal-dialog h2 { margin: 12px 0 10px; color: var(--board-ink); font: clamp(26px, 5vw, 42px) Georgia, serif; }
+.reveal-byline, .reveal-reminder { margin: 0 auto; max-width: 420px; color: var(--board-muted); font: 14px/1.5 Georgia, serif; }
+.reveal-card-name { display: grid; gap: 8px; place-items: center; margin: 24px 0; padding: 22px 15px; background: #fff4d0; border: 2px solid #b47b36; border-radius: 3px; box-shadow: 3px 4px 0 rgba(51,29,24,.14); }
+.reveal-card-name span { color: var(--board-red); font: 32px Georgia, serif; }
+.reveal-card-name strong { color: var(--board-ink); font: clamp(28px, 6vw, 48px) Georgia, serif; }
+.reveal-dialog .button { margin-top: 23px; min-height: 48px; font-size: 13px; }
+.response-backdrop { position: fixed; inset: 0; z-index: 990; display: grid; place-items: center; padding: 24px; background: rgba(35,22,19,.82); backdrop-filter: blur(2px) sepia(.14); }
+.response-dialog { width: min(620px, 100%); padding: clamp(24px, 5vw, 42px); color: var(--board-ink); text-align: center; background: var(--board-paper-light); border: 5px solid var(--board-wood); border-radius: 5px; box-shadow: 8px 10px 0 rgba(12,9,8,.3), inset 0 0 0 3px rgba(244,215,145,.4); }
+.response-dialog h2 { margin: 11px 0 9px; color: var(--board-ink); font: clamp(25px, 5vw, 40px) Georgia, serif; }
+.response-dialog > p { margin: 0 auto; max-width: 450px; color: var(--board-muted); font: 14px/1.5 Georgia, serif; }
+.response-guess { display: grid; gap: 6px; margin: 21px 0; padding: 18px; background: #fff4d0; border: 2px solid #b47b36; border-radius: 3px; }
+.response-guess strong { color: var(--board-ink); font: 24px Georgia, serif; }
+.response-guess span { color: var(--board-muted); font: 12px Georgia, serif; }
+.response-dialog .response-buttons { display: grid; gap: 9px; margin-top: 22px; }
+.response-dialog .response-buttons .button { min-height: 48px; font-size: 13px; }
+
+@media (max-width: 850px) {
+  .cards-at-play-groups { grid-template-columns: 1fr; gap: 13px; }
+  .suggestion-status-heading { align-items: flex-start; flex-direction: column; }
+  .suggestion-status-heading > span { text-align: left; }
+}
+
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; margin: 0; }
 body { min-width: 320px; background: var(--bg); overflow-x: hidden; }

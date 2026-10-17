@@ -21,6 +21,7 @@ const app = {
   pollTimer: null,
   liveRefreshInFlight: false,
   lastShownNoticeKey: "",
+  revealPrompt: null,
 };
 
 const DEFAULT_RULES = {
@@ -30,6 +31,7 @@ const DEFAULT_RULES = {
   allowChat: true,
   noRepeatRoomSuggestions: true,
   moveSuggestedCharacter: true,
+  allowMoveAfterSuggestion: false,
   turnTimer: 0,
 };
 
@@ -99,7 +101,7 @@ const CORRIDOR_LINKS = [
   ["ballroom", "hall"], ["hall", "lounge"], ["hall", "study"], ["conservatory", "billiard"],
   ["billiard", "library"], ["library", "study"], ["dining", "billiard"],
 ];
-const SECRET_PASSAGES = [["kitchen", "study"], ["lounge", "conservatory"]];
+const SECRET_PASSAGES = [];
 const ROOM_POINTS = {
   kitchen: [3, 3], ballroom: [12, 3], conservatory: [21, 3], dining: [3, 10], billiard: [21, 10],
   library: [12, 12], lounge: [3, 21], hall: [12, 21], study: [21, 21],
@@ -197,7 +199,7 @@ function makePlayers(entries, hostId) {
     return {
       id: entry.id || uid("player"),
       characterId: character.id,
-      name: character.name,
+      name: String(entry.name || "").trim().slice(0, 24) || character.name,
       color: character.color,
       isHost: (entry.id || actualHost) === actualHost,
       isConnected: true,
@@ -254,7 +256,7 @@ function startGame(state) {
   state.players.forEach((player, index) => {
     const character = characterFor(player.characterId, index, player.name);
     player.characterId = character.id;
-    player.name = character.name;
+    player.name = String(player.name || "").trim().slice(0, 24) || character.name;
     player.color = character.color;
     player.ready = true;
     const startTileIndex = START_TILE_INDEX[character.id];
@@ -373,10 +375,12 @@ function makeSuggestion(state, playerId, suspectId, weaponId) {
     roomId,
     responderIds,
     responderIndex: 0,
+    responseLog: [],
     status: responderIds.length ? "waiting" : "no-match",
     movedPlayerId: state.settings.moveSuggestedCharacter !== false ? suspectPlayer?.id : undefined,
   };
   state.suggestion = suggestion;
+  if (state.settings.allowMoveAfterSuggestion !== true) state.movesLeft = 0;
   state.lastSuggestionRoomByPlayer = { ...(state.lastSuggestionRoomByPlayer || {}), [playerId]: roomId };
   state.events.unshift(eventLog(`${player.name} made a suggestion in the ${roomName(roomId)}.`, "rose"));
   if (!responderIds.length) {
@@ -392,14 +396,17 @@ function respond(state, responderId, cardId) {
   if (cardId && !matches.includes(cardId)) return state;
   if (!cardId && matches.length) return state;
   if (cardId) {
+    suggestion.responseLog = [...(suggestion.responseLog || []), { playerId: responderId, playerName: state.players.find((player) => player.id === responderId)?.name || "A detective", result: "shown" }];
     suggestion.status = "resolved";
     suggestion.shownToPlayerId = suggestion.byPlayerId;
     suggestion.shownCardId = cardId;
     suggestion.shownByPlayerId = responderId;
     addSuggestionHistory(state, suggestion, "shown", cardId, responderId);
-    state.events.unshift(eventLog("A detective quietly answered the suggestion.", "blue"));
+    state.events.unshift(eventLog(`${state.players.find((player) => player.id === responderId)?.name || "A detective"} showed a card.`, "blue"));
     return state;
   }
+  suggestion.responseLog = [...(suggestion.responseLog || []), { playerId: responderId, playerName: state.players.find((player) => player.id === responderId)?.name || "A detective", result: "not-shown" }];
+  state.events.unshift(eventLog(`${state.players.find((player) => player.id === responderId)?.name || "A detective"} did not show a card.`, "slate"));
   suggestion.responderIndex += 1;
   if (suggestion.responderIndex >= suggestion.responderIds.length) {
     suggestion.status = "no-match";
@@ -438,7 +445,7 @@ function accuse(state, playerId, suspectId, weaponId, roomId) {
 function setNote(state, playerId, cardId, value) { state.notes[playerId] = { ...(state.notes[playerId] || {}) }; if (value === "unknown") delete state.notes[playerId][cardId]; else state.notes[playerId][cardId] = value; return state; }
 function addChat(state, playerId, text) { const player = state.players.find((item) => item.id === playerId); const trimmed = text.trim().slice(0, 240); if (!player || !trimmed || !state.settings.allowChat) return state; state.messages.push({ id: uid("message"), playerId, playerName: player.name, text: trimmed, timestamp: Date.now() }); state.messages = state.messages.slice(-60); return state; }
 
-function localDemo(characterId, roomNameValue) { const viewerId = uid("you"); let state = createGame("DEMO42", roomNameValue || "The Moonlit Estate", [{ id: viewerId, characterId }, { id: "demo-alex", characterId: "suspect-mustard" }, { id: "demo-morgan", characterId: "suspect-white" }]); startGame(state); return { state, viewerId }; }
+function localDemo(characterId, roomNameValue, playerName = "Alex") { const viewerId = uid("you"); let state = createGame("DEMO42", roomNameValue || "The Moonlit Estate", [{ id: viewerId, characterId, name: playerName }, { id: "demo-alex", characterId: "suspect-mustard", name: "Jordan" }, { id: "demo-morgan", characterId: "suspect-white", name: "Taylor" }]); startGame(state); return { state, viewerId }; }
 
 async function ensureSupabase() {
   if (!LIVE_CONFIGURED) throw new Error("Supabase is not configured. Use room DEMO42 for the local demo.");
@@ -567,6 +574,8 @@ function leaveRoom() {
   app.notice = "";
   app.joinRoomCode = "";
   app.joinPreview = null;
+  app.revealPrompt = null;
+  app.lastShownNoticeKey = "";
   render();
 }
 
@@ -670,6 +679,7 @@ function suggestionBar(state, responder, responseCards) {
   const responseChoices = responseCards.length
     ? responseCards.map((cardId) => `<button class="button button-primary" data-response="${cardId}">Show ${cardName(cardId)}</button>`).join("")
     : `<button class="button button-ghost" data-response="none">No matching card</button>`;
+  if (id === app.viewerId) return `<div class="response-backdrop"><section class="response-dialog" role="dialog" aria-modal="true" aria-labelledby="response-title"><span class="reveal-kicker">YOUR RESPONSE</span><h2 id="response-title">Answer the guess</h2><p><strong>${esc(responder?.name || "The guesser")}</strong> is waiting to see whether you can disprove this:</p><div class="response-guess"><strong>${esc(cardName(state.suggestion.suspectId))}</strong><span>with ${esc(cardName(state.suggestion.weaponId))} · ${esc(roomName(state.suggestion.roomId))}</span></div><p class="reveal-reminder">You must show one matching card if you have one. If you have none, choose that you cannot disprove it.</p><div class="response-buttons">${responseChoices}</div></section></div>`;
   return `<div class="suggestion-bar"><span class="suggestion-pulse"></span><div><strong>${id === app.viewerId ? "You must answer this suggestion." : `${esc(responder?.name || "Another detective")} is considering the suggestion.`}</strong><small>${cardName(state.suggestion.suspectId)} · ${roomName(state.suggestion.roomId)} · ${cardName(state.suggestion.weaponId)}</small></div>${id === app.viewerId ? `<div class="response-buttons">${responseChoices}</div>` : ""}</div>`;
 }
 
@@ -685,7 +695,8 @@ function selectionModal(kind) {
 }
 
 function globalOverlay() {
-  return `${app.error ? `<div class="global-error"><span>!</span>${esc(app.error)}<button data-action="clear-error">×</button></div>` : ""}${app.notice ? `<div class="toast"><span>✦</span>${esc(app.notice)}</div>` : ""}`;
+  const reveal = app.revealPrompt;
+  return `${app.error ? `<div class="global-error"><span>!</span>${esc(app.error)}<button data-action="clear-error">×</button></div>` : ""}${app.notice ? `<div class="toast"><span>✦</span>${esc(app.notice)}</div>` : ""}${reveal ? `<div class="reveal-backdrop"><section class="reveal-dialog" role="dialog" aria-modal="true" aria-labelledby="reveal-title"><span class="reveal-kicker">PRIVATE CARD REVEAL</span><h2 id="reveal-title">You were shown a card</h2><p class="reveal-byline"><strong>${esc(reveal.shownByPlayerName)}</strong> showed you one of the cards in the guess.</p><div class="reveal-card-name"><span>${esc(card(reveal.cardId)?.glyph || "▤")}</span><strong>${esc(cardName(reveal.cardId))}</strong></div><p class="reveal-reminder">Take a moment to write it down. Your Cards in Play list is only a reference and will not be marked for you.</p><button class="button button-primary button-full" data-action="confirm-reveal">I saw it — continue</button></section></div>` : ""}`;
 }
 
 function flash(message) {
@@ -778,6 +789,7 @@ root.addEventListener("click", (event) => {
     case "leave": leaveRoom(); break;
     case "copy-room": navigator.clipboard?.writeText(app.state.roomCode).then(() => flash("Room code copied to your clipboard.")); break;
     case "clear-error": app.error = ""; render(); break;
+    case "confirm-reveal": app.revealPrompt = null; render(); break;
     case "ready": act("ready", {}, (state) => toggleReady(state, app.viewerId)); break;
     case "start": act("start", {}, (state) => startGame(state)); break;
     case "roll": act("roll", {}, (state) => roll(state, app.viewerId)); break;
@@ -824,9 +836,11 @@ root.addEventListener("submit", async (event) => {
   try {
     if (form.id === "create-form") {
       const characterId = String(data.get("characterId") || "").trim();
+      const playerName = String(data.get("playerName") || "").trim();
       const roomNameValue = String(data.get("roomName") || "The Moonlit Estate").trim();
-      if (LIVE_CONFIGURED) await enterLive(await liveCall({ type: "create", roomName: roomNameValue, characterId }));
-      else enterDemo(localDemo(characterId, roomNameValue), "Demo table opened. Connect Supabase for real friends.");
+      if (!playerName) throw new Error("Enter your player name before opening the room.");
+      if (LIVE_CONFIGURED) await enterLive(await liveCall({ type: "create", roomName: roomNameValue, characterId, playerName }));
+      else enterDemo(localDemo(characterId, roomNameValue, playerName), "Demo table opened. Connect Supabase for real friends.");
     } else if (form.id === "join-form") {
       const roomCode = String(data.get("roomCode") || "").trim().toUpperCase();
       if (LIVE_CONFIGURED) {
@@ -844,9 +858,11 @@ root.addEventListener("submit", async (event) => {
       render();
     } else if (form.id === "character-form") {
       const characterId = String(data.get("characterId") || "").trim();
+      const playerName = String(data.get("playerName") || "").trim();
       if (!characterId) throw new Error("Choose an available suspect before joining.");
-      if (LIVE_CONFIGURED) await enterLive(await liveCall({ type: "join", roomCode: app.joinRoomCode, characterId }));
-      else enterDemo(localDemo(characterId, "The Moonlit Estate"), "Demo table entered.");
+      if (!playerName) throw new Error("Enter your player name before joining.");
+      if (LIVE_CONFIGURED) await enterLive(await liveCall({ type: "join", roomCode: app.joinRoomCode, characterId, playerName }));
+      else enterDemo(localDemo(characterId, "The Moonlit Estate", playerName), "Demo table entered.");
     }
   } catch (error) {
     app.error = error instanceof Error ? error.message : "The room could not be opened.";
@@ -874,7 +890,7 @@ function characterSetupView(kind) {
     const takenIds = new Set((state.players || []).map((player, index) => characterFor(player.characterId, index, player.name).id));
     const availableIds = Array.isArray(preview.availableCharacterIds) ? preview.availableCharacterIds : CHARACTER_OPTIONS.filter((character) => !takenIds.has(character.id)).map((character) => character.id);
     const availableCount = availableIds.filter((id) => !takenIds.has(id)).length;
-    return setupFrame("Choose your suspect.", `${state.roomName ? `${esc(state.roomName)} · ` : ""}Room ${esc(app.joinRoomCode)} is open. Pick an unclaimed character to join the table.`, `<form class="setup-form character-form" id="character-form">${suspectChoicesMarkup(availableIds, takenIds)}${availableCount ? `<button class="button button-primary button-full" type="submit" ${app.loading ? "disabled" : ""}>${app.loading ? "Joining…" : "Join as this suspect →"}</button>` : `<p class="setup-empty">Every suspect is already taken.</p>`}</form>`, "Your character supplies your name and color. Taken suspects cannot be selected.");
+    return setupFrame("Choose your suspect.", `${state.roomName ? `${esc(state.roomName)} · ` : ""}Room ${esc(app.joinRoomCode)} is open. Pick your name and an unclaimed character.`, `<form class="setup-form character-form" id="character-form"><label><span>Your player name</span><input name="playerName" autofocus placeholder="e.g. Jordan" maxlength="24" required></label>${suspectChoicesMarkup(availableIds, takenIds)}${availableCount ? `<button class="button button-primary button-full" type="submit" ${app.loading ? "disabled" : ""}>${app.loading ? "Joining…" : "Join the table →"}</button>` : `<p class="setup-empty">Every suspect is already taken.</p>`}</form>`, "Your name appears in the case log. Your character supplies your color and board piece.");
   }
 
   const create = kind === "create";
@@ -882,7 +898,7 @@ function characterSetupView(kind) {
     return setupFrame("Enter the room code.", "Join the table first. The room will show you which suspects are still available.", `<form class="setup-form" id="join-form"><label><span>Room code</span><input class="code-input" name="roomCode" autofocus placeholder="A7K2QF" maxlength="6" required></label><button class="button button-primary button-full" type="submit" ${app.loading ? "disabled" : ""}>${app.loading ? "Opening…" : "See available suspects →"}</button></form>`);
   }
 
-  return setupFrame("Set the table.", "Choose your suspect. Your character supplies your name and color for the whole game.", `<form class="setup-form" id="create-form"><label><span>Your suspect</span></label>${suspectChoicesMarkup(CHARACTER_OPTIONS.map((character) => character.id))}<label><span>Mansion name <small>optional</small></span><input name="roomName" value="The Moonlit Estate" maxlength="36"></label><button class="button button-primary button-full" type="submit" ${app.loading ? "disabled" : ""}>${app.loading ? "Opening…" : "Create the room →"}</button></form>`);
+  return setupFrame("Set the table.", "Choose your name and character. Your character supplies your color and board piece.", `<form class="setup-form" id="create-form"><label><span>Your player name</span><input name="playerName" autofocus placeholder="e.g. Alex" maxlength="24" required></label><label><span>Your suspect</span></label>${suspectChoicesMarkup(CHARACTER_OPTIONS.map((character) => character.id))}<label><span>Mansion name <small>optional</small></span><input name="roomName" value="The Moonlit Estate" maxlength="36"></label><button class="button button-primary button-full" type="submit" ${app.loading ? "disabled" : ""}>${app.loading ? "Opening…" : "Create the room →"}</button></form>`);
 }
 setupView = characterSetupView;
 
@@ -994,19 +1010,45 @@ function cleanNotebookMarkup(state, myHand, myNotes) {
   return `<details class="case-notebook" open><summary><span class="notebook-summary-icon">☷</span><span class="notebook-summary-copy"><strong>Private detective notebook</strong><small>${cards.length} cards in this case · ${knownCount} tracked</small></span><span class="notebook-summary-action">tap to fold</span></summary><div class="notebook-body"><p class="notebook-explainer">Only this game's active deck is listed. The three envelope cards stay hidden. Click a named card to cycle its color: possible, ruled out, or known.</p><div class="notebook-legend"><span><b class="legend-known"></b> known / your card</span><span><b class="legend-maybe"></b> possible</span><span><b class="legend-out"></b> ruled out</span><span><b class="legend-owner"></b> owner assigned</span></div><div class="notebook-groups">${groups.map(([category, label]) => `<section class="notebook-group"><h3>${label}</h3><div class="notebook-card-list">${cards.filter((item) => item.category === category).map((item) => notebookCardMarkup(state, item, myHand, myNotes, owners)).join("") || `<span class="notebook-empty">No ${label.toLowerCase()} are in this deck.</span>`}</div></section>`).join("")}</div></div></details>`;
 }
 
+function cardsAtPlayMarkup(state) {
+  const groups = [["suspect", "Suspects"], ["room", "Rooms"], ["weapon", "Weapons"]];
+  const cards = activeDeckCards(state);
+  return `<section class="cards-at-play"><div class="cards-at-play-heading"><div><span class="section-kicker">CARDS IN PLAY</span><strong>Keep track at the table.</strong></div><span class="clean-count">${cards.length}</span></div><p class="cards-at-play-intro">This is the active deck for this game. The three envelope cards are not listed, so mark your own copy as people reveal information.</p><div class="cards-at-play-groups">${groups.map(([category, label]) => `<section class="cards-at-play-group"><h3>${label}</h3><div class="cards-at-play-list">${cards.filter((item) => item.category === category).map((item) => `<div class="cards-at-play-card tone-${item.tone}"><span class="cards-at-play-glyph">${item.glyph}</span><span><strong>${esc(item.name)}</strong><small>${item.expansion ? "Added for this table" : "Classic card"}</small></span></div>`).join("") || `<span class="cards-at-play-empty">No ${label.toLowerCase()} are in this deck.</span>`}</div></section>`).join("")}</div></section>`;
+}
+
+// The old notebook helper name is kept for saved markup compatibility; the live
+// game now shows a non-interactive deck reference and players track clues on paper.
+cleanNotebookMarkup = cardsAtPlayMarkup;
+
 function compactHandCard(id, note) {
   const item = card(id);
   if (!item) return "";
-  return `<button class="compact-hand-card tone-${item.tone}" data-note-card="${item.id}" title="Click to mark this card"><span>${item.glyph}</span><strong>${esc(item.name)}</strong><small>${note === "found" ? "in your hand" : item.category}</small></button>`;
+  return `<div class="compact-hand-card tone-${item.tone}"><span>${item.glyph}</span><strong>${esc(item.name)}</strong><small>in your hand</small></div>`;
 }
 
 function cleanPlayerRows(state) {
-  return state.players.map((player) => `<div class="clean-player-row player-${player.color} ${player.eliminated ? "eliminated" : ""}"><span class="clean-player-dot"></span><span class="clean-player-name">${esc(player.name)}${player.id === app.viewerId ? " <em>you</em>" : ""}</span>${player.eliminated ? `<span class="clean-eliminated-label">OUT</span>` : player.id === state.players[state.currentPlayerIndex]?.id ? `<span class="clean-turn-label">TURN</span>` : ""}${player.isHost ? `<span class="clean-host-label">HOST</span>` : ""}</div>`).join("");
+  return state.players.map((player, index) => { const character = characterFor(player.characterId, index, player.name); return `<div class="clean-player-row player-${player.color} ${player.eliminated ? "eliminated" : ""}"><span class="clean-player-dot"></span><span class="clean-player-name"><strong>${esc(player.name)}${player.id === app.viewerId ? " <em>you</em>" : ""}</strong><small>${esc(character.name)}</small></span>${player.eliminated ? `<span class="clean-eliminated-label">OUT</span>` : player.id === state.players[state.currentPlayerIndex]?.id ? `<span class="clean-turn-label">TURN</span>` : ""}${player.isHost ? `<span class="clean-host-label">HOST</span>` : ""}</div>`; }).join("");
 }
 
 function cleanEventRows(state) {
   return state.events.slice(0, 5).map((item) => `<div class="clean-event-row"><i class="event-${item.tone}"></i><span>${esc(item.text)}</span></div>`).join("");
 }
+
+function suggestionStatusMarkup(state) {
+  const suggestion = state?.suggestion;
+  if (!suggestion) return "";
+  const responder = suggestion.status === "waiting" ? state.players.find((player) => player.id === suggestion.responderIds[suggestion.responderIndex]) : null;
+  const responseLog = (suggestion.responseLog || []).map((entry) => `<span class="suggestion-response ${entry.result === "shown" ? "shown" : "not-shown"}">${esc(entry.playerName)} ${entry.result === "shown" ? "showed a card." : "did not show a card."}</span>`).join("");
+  const outcome = suggestion.status === "waiting"
+    ? `Waiting for ${responder?.name || "the next detective"}.`
+    : suggestion.status === "resolved"
+      ? "A card was shown privately to the guesser."
+      : "No one could disprove this guess.";
+  return `<section class="suggestion-status ${suggestion.status}"><div class="suggestion-status-heading"><div><span class="section-kicker">GUESS RESPONSE</span><strong>${esc(cardName(suggestion.suspectId))} · ${esc(cardName(suggestion.weaponId))} · ${esc(roomName(suggestion.roomId))}</strong></div><span>${esc(outcome)}</span></div><div class="suggestion-response-log">${responseLog || `<span class="suggestion-response waiting">The response order is starting.</span>`}</div></section>`;
+}
+
+const renderCardsAtPlay = cleanNotebookMarkup;
+cleanNotebookMarkup = (state) => `${suggestionStatusMarkup(state)}${renderCardsAtPlay(state)}`;
 
 function accusationResultMarkup(state) {
   const accusation = state?.lastAccusation;
@@ -1025,26 +1067,12 @@ function rememberShownCard(state) {
   const latestShown = [...(state?.suggestionHistory || [])].reverse().find((entry) => entry.shownToPlayerId === app.viewerId && entry.shownCardId);
   const cardId = suggestion?.shownToPlayerId === app.viewerId ? suggestion.shownCardId : latestShown?.shownCardId;
   if (!state || !cardId) return;
-  const ownerId = suggestion?.shownToPlayerId === app.viewerId ? suggestion.shownByPlayerId : latestShown?.shownByPlayerId;
   const noticeKey = `${state.roomCode}:${latestShown?.id || `${suggestion?.byPlayerId || ""}:${cardId}`}`;
-  const shouldAnnounce = app.lastShownNoticeKey !== noticeKey;
+  if (app.lastShownNoticeKey === noticeKey || app.revealPrompt?.key === noticeKey) return;
   app.lastShownNoticeKey = noticeKey;
-  if (ownerId) {
-    const owners = { ...getCardOwners(state), [cardId]: ownerId };
-    saveCardOwners(state, owners);
-  }
-  if (app.live) {
-    const key = `clue-nexus-notes-${state.roomCode}-${app.viewerId}`;
-    const notes = getLiveNotes(state);
-    if (notes[cardId] !== "found") {
-      const next = { ...notes, [cardId]: "found" };
-      try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* Notes still show in this render. */ }
-      state.myNotes = next;
-    }
-  } else {
-    state.notes = { ...(state.notes || {}), [app.viewerId]: { ...(state.notes?.[app.viewerId] || {}), [cardId]: "found" } };
-  }
-  if (shouldAnnounce) flash(`You were shown ${cardName(cardId)}. Your journal has been updated.`);
+  const shownByPlayerId = suggestion?.shownToPlayerId === app.viewerId ? suggestion.shownByPlayerId : latestShown?.shownByPlayerId;
+  const shownByPlayerName = state.players?.find((player) => player.id === shownByPlayerId)?.name || "Another detective";
+  app.revealPrompt = { key: noticeKey, cardId, shownByPlayerName };
 }
 
 function cleanSuggestionRows(state) {
@@ -1099,7 +1127,11 @@ function cleanGameView(state) {
   const canEnd = canAct && state.movesLeft === 0 && state.lastRoll !== null;
   const phaseTitle = state.phase === "won" ? "Case closed." : state.phase === "ended" ? "The trail went cold." : "Find the missing truth.";
   const locationText = inRoom ? roomName(currentRoom) : "Hallway";
-  const actionHint = sameRoomBlocked
+  const actionHint = state.suggestion?.status === "waiting"
+    ? "The guess is moving through the table. Watch the response trail."
+    : state.suggestion && settings.allowMoveAfterSuggestion !== true && (state.suggestion.status === "resolved" || state.suggestion.status === "no-match")
+      ? "Guess resolved. End your turn when you are ready."
+      : sameRoomBlocked
     ? "Enter a different room before making another guess."
     : !inRoom && isMyTurn
       ? "Enter a room to make a guess."
@@ -1109,6 +1141,8 @@ function cleanGameView(state) {
   return `<div class="game-shell clean-game"><header class="game-header clean-header"><div class="brand-lockup compact"><span class="brand-mark">✦</span><span>CLUE <em>NEXUS</em></span></div><div class="header-room"><span>ROOM</span><button data-action="copy-room">${esc(state.roomCode)}<small>copy</small></button></div><div class="header-right">${!app.live ? `<label class="demo-switcher"><span>Playing as</span><select data-action="switch-player">${state.players.map((player) => `<option value="${player.id}" ${player.id === app.viewerId ? "selected" : ""}>${esc(player.name)}</option>`).join("")}</select></label>` : ""}<span class="connection-badge"><i class="status-dot ${app.live ? "live" : "demo"}"></i>${app.live ? "LIVE" : "DEMO"}</span><button class="icon-button" data-action="leave" aria-label="Leave room">↗</button></div></header><main class="clean-game-layout"><section class="clean-board-column"><div class="clean-title-row"><div><p class="eyebrow">${esc(state.roomName)}</p><h1>${phaseTitle}</h1></div><div class="clean-turn-summary"><span>${active ? `${esc(active.name)}'s turn` : "Waiting"}</span><strong>${isMyTurn ? (state.movesLeft ? `${state.movesLeft} spaces left` : "Roll to move") : state.phase.toUpperCase()}</strong></div></div>${accusationResultMarkup(state)}<div class="tile-board-card"><div class="tile-board-top"><span>THE ESTATE BOARD</span><span class="board-top-location">${me ? `${esc(locationText)} · space ${currentTile + 1}` : "Waiting for detectives"}</span></div><div class="tile-board" role="application" aria-label="Connected estate board with rooms and movement spaces"><div class="tile-board-grid"></div>${boardRoomsMarkup()}${tileConnectionsMarkup()}${BOARD_TILES.map((tile) => boardTileMarkup(state, tile, reachable, isMyTurn)).join("")}<div class="board-center-card"><span>CLUE NEXUS</span><strong>${esc(locationText)}</strong><small>${isMyTurn ? state.movesLeft > 0 ? "Choose a marked space" : "Roll the die to begin" : `Watching ${esc(active?.name || "the table")}`}</small></div><div class="secret-board-note">Dashed links = secret passages</div></div><div class="tile-board-bottom"><span>${actionHint}</span><span>${state.lastRoll ? `Last roll: ${state.lastRoll}` : "No roll yet"}</span></div></div><div class="clean-action-bar"><button class="button dice-button clean-action-roll" data-action="roll" ${canAct && state.movesLeft === 0 && state.lastRoll === null ? "" : "disabled"}><span>⚄</span>Roll</button><button class="button button-ghost" data-action="finish-movement" ${canFinish ? "" : "disabled"}>Finish movement</button><button class="button button-ghost" data-action="end-turn" ${canEnd ? "" : "disabled"}>End turn</button><span class="clean-action-divider"></span><button class="button button-ghost" data-modal="suggest" ${canSuggest ? "" : "disabled"}>Make a guess</button><button class="button button-danger" data-modal="accuse" ${canAccuse ? "" : "disabled"}>Accuse</button></div>${cleanNotebookMarkup(state, myHand, myNotes)}${state.suggestion?.status === "waiting" ? suggestionBar(state, responder, responseCards) : ""}</section><aside class="clean-sidebar"><section class="clean-side-card clean-turn-card"><div class="clean-card-heading"><span class="section-kicker">CURRENT TURN</span><span class="clean-roll-badge">${state.movesLeft ? `${state.movesLeft} left` : state.lastRoll ? `rolled ${state.lastRoll}` : "ready"}</span></div><div class="clean-current-player"><span class="turn-avatar player-${active?.color || "gold"}">${esc(active?.name?.slice(0, 1) || "?")}</span><div><strong>${esc(active?.name || "Waiting")}</strong><small>${isMyTurn ? "This is your turn" : "Watch the board"}</small></div></div></section><section class="clean-side-card"><div class="clean-card-heading"><span class="section-kicker">DETECTIVES</span><span class="clean-count">${state.players.length}/7</span></div><div class="clean-player-list">${cleanPlayerRows(state)}</div></section><section class="clean-side-card clean-history-card"><div class="clean-card-heading"><span class="section-kicker">SUGGESTION NOTES</span><span class="clean-count">${(state.suggestionHistory || []).length}</span></div><div class="clean-history-list">${cleanSuggestionRows(state)}</div></section><section class="clean-side-card clean-hand-panel"><div class="clean-card-heading"><span class="section-kicker">YOUR CARDS</span><span class="clean-count">${myHand.length}</span></div><div class="compact-hand">${myHand.length ? myHand.map((id) => compactHandCard(id, myNotes[id])).join("") : `<span class="clean-empty">Cards arrive when the case starts.</span>`}</div></section><section class="clean-side-card clean-activity"><div class="clean-card-heading"><span class="section-kicker">CASE LOG</span></div><div class="clean-event-list">${cleanEventRows(state)}</div>${settings.allowChat !== false ? `<form class="chat-form clean-chat-form" id="chat-form"><input name="text" placeholder="Say something suspicious…" maxlength="240"><button aria-label="Send message">↑</button></form>` : ""}</section></aside></main>${app.modal === "suggest" ? selectionModal("suggest") : app.modal === "accuse" ? selectionModal("accuse") : ""}${globalOverlay()}</div>`;
 }
 
+const boardGameView = cleanGameView;
+cleanGameView = (state) => boardGameView(state).replace(/<div class="secret-board-note">[\s\S]*?<\/div>/g, "");
 gameView = cleanGameView;
 
 // The notebook is the private record players actually need. Keep the old
@@ -1124,7 +1158,7 @@ lobbyView = function updatedLobbyView(state) {
   const host = state.hostId === app.viewerId;
   const settings = { ...DEFAULT_RULES, ...(state.settings || {}) };
   const deck = cardsForPlayers(state.players.length, settings.expansionCards);
-  return `<div class="lobby-page"><div class="lobby-hero"><div><p class="eyebrow">The guest list is forming</p><h1>${esc(state.roomName)}</h1><p class="lobby-subtitle">Choose a suspect, share the room code, and let the accusations begin.</p></div><div class="room-code-card"><span>ROOM CODE</span><strong>${esc(state.roomCode)}</strong><small>Share this code with the other detectives</small></div></div><div class="lobby-grid"><section class="panel players-panel"><div class="panel-heading"><div><span class="section-kicker">01 / THE GUESTS</span><h2>Choose your suspect.</h2></div><span class="count-badge">${state.players.length} / 7</span></div><div class="player-list">${state.players.map((player, index) => { const character = characterFor(player.characterId, index, player.name); return `<div class="lobby-player player-${character.color}"><div class="player-avatar">${character.glyph}</div><div class="player-meta"><strong>${esc(character.name)}${player.id === app.viewerId ? " (you)" : ""}</strong><span>${player.isHost ? "Host / case owner" : player.ready ? "Ready to investigate" : "Choosing a seat"}</span></div>${player.isHost ? "<span class=\"host-tag\">HOST</span>" : ""}<span class="ready-light ${player.ready ? "ready" : ""}"></span></div>`; }).join("")}${state.players.length < 7 ? `<div class="empty-seat"><span>＋</span><div><strong>Invite another detective</strong><small>${app.live ? "Send them the room code" : "Connect Supabase for live friends"}</small></div></div>` : ""}</div><div class="panel-footer player-footer"><span><i class="status-dot ${app.live ? "live" : "demo"}"></i>${app.live ? "Live room" : "Local demo table"}</span><button class="button button-subtle" data-action="leave">Leave room</button></div></section><section class="panel rules-panel"><div class="panel-heading"><div><span class="section-kicker">02 / THE HOUSE RULES</span><h2>Make it yours.</h2></div><span class="wax-seal">✦</span></div><div class="rules-list">${ruleRow("Balanced deck", `${deck.handSize} cards per detective`, settings.balancedDeck, !host, "balancedDeck")}${ruleRow("Nexus expansion", `${deck.expansionCards.length} new card${deck.expansionCards.length === 1 ? "" : "s"} at this table`, settings.expansionCards, !host, "expansionCards")}${ruleRow("Accuse anytime", "A final accusation is not limited to your room", settings.finalAccusationAnytime, !host, "finalAccusationAnytime")}${ruleRow("No same-room repeats", "Require a different room for each consecutive guess", settings.noRepeatRoomSuggestions, !host, "noRepeatRoomSuggestions")}${ruleRow("Move suggested suspect", "Bring the named suspect into the room after a guess", settings.moveSuggestedCharacter, !host, "moveSuggestedCharacter")}</div><div class="deck-preview"><span class="deck-preview-icon">▤</span><div><strong>${state.players.length < 2 ? "Waiting for another player" : `${state.players.length} detectives, ${state.players.length * deck.handSize + 3} cards in play`}</strong><small>Dashed board links are secret passages. The host can change these rules before starting.</small></div></div></section></div><div class="lobby-bottom-bar"><div class="ready-callout"><span class="ready-ring"></span>${me?.ready ? "You’re ready. Waiting for the host." : host ? "You’re the host. Start when everyone is ready." : "Mark yourself ready when you’re set."}</div><div class="lobby-actions">${!host ? `<button class="button ${me?.ready ? "button-ghost" : "button-primary"}" data-action="ready">${me?.ready ? "Unready" : "I’m ready →"}</button>` : `<button class="button button-primary" ${state.players.length < 2 ? "disabled" : ""} data-action="start">${state.players.length < 2 ? "Waiting for a second player" : "Seal the case →"}</button>`}</div></div>${globalOverlay()}</div>`;
+  return `<div class="lobby-page"><div class="lobby-hero"><div><p class="eyebrow">The guest list is forming</p><h1>${esc(state.roomName)}</h1><p class="lobby-subtitle">Choose a name and suspect, share the room code, and let the accusations begin.</p></div><div class="room-code-card"><span>ROOM CODE</span><strong>${esc(state.roomCode)}</strong><small>Share this code with the other detectives</small></div></div><div class="lobby-grid"><section class="panel players-panel"><div class="panel-heading"><div><span class="section-kicker">01 / THE GUESTS</span><h2>Who’s at the table?</h2></div><span class="count-badge">${state.players.length} / 7</span></div><div class="player-list">${state.players.map((player, index) => { const character = characterFor(player.characterId, index, player.name); return `<div class="lobby-player player-${character.color}"><div class="player-avatar">${character.glyph}</div><div class="player-meta"><strong>${esc(player.name)}${player.id === app.viewerId ? " (you)" : ""}</strong><span>${esc(character.name)} · ${player.isHost ? "Host / case owner" : player.ready ? "Ready to investigate" : "Choosing a seat"}</span></div>${player.isHost ? "<span class=\"host-tag\">HOST</span>" : ""}<span class="ready-light ${player.ready ? "ready" : ""}"></span></div>`; }).join("")}${state.players.length < 7 ? `<div class="empty-seat"><span>＋</span><div><strong>Invite another detective</strong><small>${app.live ? "Send them the room code" : "Connect Supabase for live friends"}</small></div></div>` : ""}</div><div class="panel-footer player-footer"><span><i class="status-dot ${app.live ? "live" : "demo"}"></i>${app.live ? "Live room" : "Local demo table"}</span><button class="button button-subtle" data-action="leave">Leave room</button></div></section><section class="panel rules-panel"><div class="panel-heading"><div><span class="section-kicker">02 / THE HOUSE RULES</span><h2>Make it yours.</h2></div><span class="wax-seal">✦</span></div><div class="rules-list">${ruleRow("Balanced deck", `${deck.handSize} cards per detective`, settings.balancedDeck, !host, "balancedDeck")}${ruleRow("Nexus expansion", `${deck.expansionCards.length} new card${deck.expansionCards.length === 1 ? "" : "s"} at this table`, settings.expansionCards, !host, "expansionCards")}${ruleRow("Accuse anytime", "A final accusation is not limited to your room", settings.finalAccusationAnytime, !host, "finalAccusationAnytime")}${ruleRow("No same-room repeats", "Require a different room for each consecutive guess", settings.noRepeatRoomSuggestions, !host, "noRepeatRoomSuggestions")}${ruleRow("Move suggested suspect", "Bring the named suspect into the room after a guess", settings.moveSuggestedCharacter, !host, "moveSuggestedCharacter")}${ruleRow("Move after a guess", "Allow remaining movement after the response finishes", settings.allowMoveAfterSuggestion, !host, "allowMoveAfterSuggestion")}</div><div class="deck-preview"><span class="deck-preview-icon">▤</span><div><strong>${state.players.length < 2 ? "Waiting for another player" : `${state.players.length} detectives, ${state.players.length * deck.handSize + 3} cards in play`}</strong><small>Marked doors show the room entrances. The host can change these rules before starting.</small></div></div></section></div><div class="lobby-bottom-bar"><div class="ready-callout"><span class="ready-ring"></span>${me?.ready ? "You’re ready. Waiting for the host." : host ? "You’re the host. Start when everyone is ready." : "Mark yourself ready when you’re set."}</div><div class="lobby-actions">${!host ? `<button class="button ${me?.ready ? "button-ghost" : "button-primary"}" data-action="ready">${me?.ready ? "Unready" : "I’m ready →"}</button>` : `<button class="button button-primary" ${state.players.length < 2 ? "disabled" : ""} data-action="start">${state.players.length < 2 ? "Waiting for a second player" : "Seal the case →"}</button>`}</div></div>${globalOverlay()}</div>`;
 };
 
 async function restoreLiveRoom() {

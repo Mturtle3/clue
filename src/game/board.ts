@@ -100,10 +100,7 @@ const CORRIDOR_LINKS: Array<[RoomId, RoomId]> = [
   ["dining", "billiard"],
 ];
 
-export const SECRET_PASSAGES: Array<[RoomId, RoomId]> = [
-  ["kitchen", "study"],
-  ["lounge", "conservatory"],
-];
+export const SECRET_PASSAGES: Array<[RoomId, RoomId]> = [];
 
 const keyFor = (x: number, y: number): string => `${x}:${y}`;
 const blocked = new Set<string>();

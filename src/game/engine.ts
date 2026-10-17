@@ -80,7 +80,7 @@ export function buildPlayers(
     return {
       id: entry.id ?? makeId("player"),
       characterId: character.id,
-      name: character.name,
+      name: entry.name?.trim().slice(0, 24) || character.name,
       color: character.color,
       isHost: false,
       isConnected: true,
@@ -148,7 +148,7 @@ export function startGame(state: GameState): GameState {
     return {
       ...player,
       characterId: character.id,
-      name: character.name,
+      name: player.name?.trim().slice(0, 24) || character.name,
       color: character.color,
       ready: true,
       cardCount: dealtState.hands[player.id]?.length ?? 0,
@@ -335,6 +335,7 @@ export function makeSuggestion(
     roomId,
     responderIds,
     responderIndex: 0,
+    responseLog: [],
     status: responderIds.length ? "waiting" : "no-match",
     movedPlayerId: state.settings.moveSuggestedCharacter !== false ? suspectPlayer?.id : undefined,
   };
@@ -342,6 +343,7 @@ export function makeSuggestion(
     ...state,
     players: movedPlayers,
     suggestion,
+    movesLeft: state.settings.allowMoveAfterSuggestion === true ? state.movesLeft : 0,
     lastSuggestionRoomByPlayer: { ...(state.lastSuggestionRoomByPlayer ?? {}), [playerId]: roomId },
     events: [event(`${player.name} made a suggestion in the ${roomName(roomId)}.`, "rose"), ...state.events].slice(0, 30),
   };
@@ -364,23 +366,25 @@ export function submitSuggestionResponse(state: GameState, responderId: string, 
   // This is checked on the server so a modified browser cannot bluff.
   if (!cardId && validCards.length > 0) return state;
   if (cardId) {
+    const responseLog = [...(suggestion.responseLog ?? []), { playerId: responderId, playerName: responder.name, result: "shown" as const }];
     return {
       ...state,
-      suggestion: { ...suggestion, status: "resolved", shownToPlayerId: suggestion.byPlayerId, shownCardId: cardId, shownByPlayerId: responderId },
+      suggestion: { ...suggestion, responseLog, status: "resolved", shownToPlayerId: suggestion.byPlayerId, shownCardId: cardId, shownByPlayerId: responderId },
       suggestionHistory: addSuggestionHistory(state, suggestion, "shown", cardId, responderId),
-      events: [event(`${responder.name} quietly answered the suggestion.`, "blue"), ...state.events].slice(0, 30),
+      events: [event(`${responder.name} showed a card.`, "blue"), ...state.events].slice(0, 30),
     };
   }
+  const responseLog = [...(suggestion.responseLog ?? []), { playerId: responderId, playerName: responder.name, result: "not-shown" as const }];
   const nextIndex = suggestion.responderIndex + 1;
   if (nextIndex >= suggestion.responderIds.length) {
     return {
       ...state,
-      suggestion: { ...suggestion, status: "no-match" },
+      suggestion: { ...suggestion, responseLog, status: "no-match" },
       suggestionHistory: addSuggestionHistory(state, suggestion, "no-match"),
-      events: [event("No one could disprove the suggestion.", "rose"), ...state.events].slice(0, 30),
+      events: [event(`${responder.name} did not show a card.`, "slate"), event("No one could disprove the suggestion.", "rose"), ...state.events].slice(0, 30),
     };
   }
-  return { ...state, suggestion: { ...suggestion, responderIndex: nextIndex } };
+  return { ...state, suggestion: { ...suggestion, responseLog, responderIndex: nextIndex }, events: [event(`${responder.name} did not show a card.`, "slate"), ...state.events].slice(0, 30) };
 }
 
 export function autoResolveSuggestion(state: GameState): GameState {

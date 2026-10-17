@@ -86,7 +86,14 @@ export type RuleSettings = {
   allowChat: boolean;
   noRepeatRoomSuggestions: boolean;
   moveSuggestedCharacter: boolean;
+  allowMoveAfterSuggestion: boolean;
   turnTimer: number;
+};
+
+export type SuggestionResponse = {
+  playerId: string;
+  playerName: string;
+  result: "shown" | "not-shown";
 };
 
 export type Suggestion = {
@@ -96,6 +103,7 @@ export type Suggestion = {
   roomId: RoomId;
   responderIds: string[];
   responderIndex: number;
+  responseLog: SuggestionResponse[];
   status: "waiting" | "resolved" | "no-match";
   movedPlayerId?: string;
   shownToPlayerId?: string;
@@ -186,6 +194,7 @@ export const DEFAULT_RULES: RuleSettings = {
   allowChat: true,
   noRepeatRoomSuggestions: true,
   moveSuggestedCharacter: true,
+  allowMoveAfterSuggestion: false,
   turnTimer: 0,
 };
 

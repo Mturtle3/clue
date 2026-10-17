@@ -24,8 +24,8 @@ const corsHeaders = {
 };
 
 type Action =
-  | { type: "create"; roomName: string; characterId: string; settings?: Partial<RuleSettings> }
-  | { type: "join"; roomCode: string; characterId: string }
+  | { type: "create"; roomName: string; characterId: string; playerName?: string; settings?: Partial<RuleSettings> }
+  | { type: "join"; roomCode: string; characterId: string; playerName?: string }
   | { type: "preview"; roomCode: string }
   | { type: "get"; roomCode: string }
   | { type: "ready"; roomCode: string }
@@ -153,6 +153,11 @@ function requestedCharacter(characterId: string) {
   return character;
 }
 
+function requestedPlayerName(playerName: unknown, fallback: string): string {
+  const value = String(playerName ?? "").trim().slice(0, 24);
+  return value || fallback;
+}
+
 function usedCharacterIds(state: GameState): Set<string> {
   const ids = state.players
     .map((player, index) => player.characterId || findCharacterByName(player.name)?.id || CHARACTERS[index]?.id)
@@ -185,7 +190,7 @@ async function createRoom(userId: string, action: Extract<Action, { type: "creat
   const roomCode = await generateRoomCode();
   const settings: RuleSettings = { ...DEFAULT_RULES, ...(action.settings ?? {}) };
   const character = requestedCharacter(action.characterId);
-  const state = createGame(roomCode, action.roomName.trim().slice(0, 36) || "The Unnamed Estate", [{ id: userId, characterId: character.id }], settings);
+  const state = createGame(roomCode, action.roomName.trim().slice(0, 36) || "The Unnamed Estate", [{ id: userId, characterId: character.id, name: requestedPlayerName(action.playerName, character.name) }], settings);
   const room = await admin.from("clue_rooms").insert({ code: roomCode, room_name: state.roomName, host_id: userId, phase: state.phase, public_state: publicStoredState(state) }).select("id").single();
   if (room.error) throw room.error;
   const roomId = room.data.id as string;
@@ -205,7 +210,7 @@ async function joinRoom(userId: string, action: Extract<Action, { type: "join" }
   if (state.phase !== "lobby") throw new Error("This game has already started.");
   if (state.players.length >= 7) throw new Error("This room is full.");
   const character = ensureCharacterAvailable(state, action.characterId);
-  const next = addPlayer(state, { id: userId, characterId: character.id });
+  const next = addPlayer(state, { id: userId, characterId: character.id, name: requestedPlayerName(action.playerName, character.name) });
   await syncState(loaded.room.id, next);
   return { roomCode: next.roomCode, state: publicState(next, userId) };
 }
